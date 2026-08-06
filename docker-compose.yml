@@ -1,0 +1,10 @@
+services:
+  brain-farm:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    environment:
+      - MOCK_MODE=True
+    restart: unless-stopped
