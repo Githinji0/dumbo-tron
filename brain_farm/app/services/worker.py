@@ -94,7 +94,55 @@ class SimulationWorker:
             )
             exprs = result.scalars().all()
             
+            if not exprs:
+                return
+
+            from brain_farm.app.services.correlation_filter import CorrelationFilter
+
             for expr in exprs:
+                # Query already PASSED expressions in the projects pool to match against
+                passed_res = await db.execute(
+                    select(Expression.expression_text)
+                    .where(Expression.project_id == expr.project_id)
+                    .where(Expression.status == "PASSED")
+                )
+                passed_formulas = [r[0] for r in passed_res.all()]
+                
+                is_redundant = False
+                reason = ""
+                for passed in passed_formulas:
+                    if expr.expression_text.strip() == passed.strip():
+                        is_redundant = True
+                        reason = "Exact duplicate of a passed Alpha expression"
+                        break
+                    
+                    # Calculate synthetic Pearson correlation
+                    corr = CorrelationFilter.calculate_correlation(expr.expression_text, passed)
+                    if abs(corr) > 0.85:
+                        is_redundant = True
+                        reason = f"Highly correlated (Pearson = {corr:.2f}) with passed Alpha: '{passed[:30]}...'"
+                        break
+                        
+                    # Calculate Jaccard similarity
+                    jacc = CorrelationFilter.calculate_ast_similarity(expr.expression_text, passed)
+                    if jacc > 0.90:
+                        is_redundant = True
+                        reason = f"Syntactically redundant (Jaccard = {jacc:.2f}) with passed Alpha: '{passed[:30]}...'"
+                        break
+                
+                if is_redundant:
+                    expr.status = "REJECTED"
+                    
+                    # Add project warning log
+                    log = ProjectLog(
+                        project_id=expr.project_id,
+                        level="WARNING",
+                        message=f"Correlation Filter: Rejected '{expr.expression_text[:35]}...' -> {reason}"
+                    )
+                    db.add(log)
+                    logger.warning(f"Correlation Filter: Rejected expression {expr.id} -> {reason}")
+                    continue
+
                 # Mark expression as SIMULATING
                 expr.status = "SIMULATING"
                 # Create a Simulation run record
@@ -104,11 +152,9 @@ class SimulationWorker:
                 )
                 db.add(sim)
                 
-                # Add a log
                 logger.info(f"Queued simulation for Alpha expr: {expr.expression_text}")
                 
-            if exprs:
-                await db.commit()
+            await db.commit()
 
     async def process_queued_simulations(self):
         """Checks for QUEUED simulations and posts them to WorldQuant BRAIN."""
@@ -267,11 +313,21 @@ class SimulationWorker:
                 db.add(metric)
                 
                 # Evaluate against thresholds
+                sub_universe_data = data.get("subUniverseSharpe", {})
+                passed_sub_sharpe = True
+                failing_sub_universes = []
+                for sub_universe, sub_sharpe in sub_universe_data.items():
+                    sub_sharpe_val = float(sub_sharpe)
+                    if sub_sharpe_val < proj.min_sub_universe_sharpe:
+                        passed_sub_sharpe = False
+                        failing_sub_universes.append(f"{sub_universe}: {sub_sharpe_val:.2f}")
+
                 passed = (
                     sharpe >= proj.min_sharpe and 
                     fitness >= proj.min_fitness and 
                     turnover <= proj.max_turnover and 
-                    margin >= proj.min_margin
+                    margin >= proj.min_margin and
+                    passed_sub_sharpe
                 )
                 
                 if passed:
@@ -286,6 +342,7 @@ class SimulationWorker:
                     if fitness < proj.min_fitness: reasons.append(f"Fitness {fitness:.2f} < {proj.min_fitness}")
                     if turnover > proj.max_turnover: reasons.append(f"Turnover {turnover:.2%} > {proj.max_turnover}")
                     if margin < proj.min_margin: reasons.append(f"Margin {margin:.2f} bps < {proj.min_margin}")
+                    if not passed_sub_sharpe: reasons.append(f"Sub-Universe (Min: {proj.min_sub_universe_sharpe}) failed: {', '.join(failing_sub_universes)}")
                     msg = f"Alpha Rejected! {expr.expression_text[:30]}... Reason: {', '.join(reasons)}"
                 
                 log = ProjectLog(

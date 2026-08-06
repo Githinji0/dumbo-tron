@@ -230,6 +230,10 @@ class BrainClient:
                         "returns": round(returns, 4),
                         "margin": round(margin, 5),
                         "drawdown": round(random.uniform(0.01, 0.25), 4)
+                    },
+                    "subUniverseSharpe": {
+                        "TOP2000": round(sharpe * 0.88, 3),
+                        "TOP1000": round(sharpe * 0.76, 3)
                     }
                 }
                 

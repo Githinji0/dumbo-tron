@@ -137,7 +137,7 @@ with st.sidebar:
                     return res.scalar_one_or_none()
             active_proj = run_async(get_project(proj_id))
             if active_proj:
-                st.info(f"📍 Settings:\n- Universe: {active_proj.universe}\n- Region: {active_proj.region}\n- Threshold: Sharpe ≥ {active_proj.min_sharpe}")
+                st.info(f"📍 Settings:\n- Universe: {active_proj.universe}\n- Region: {active_proj.region}\n- Threshold: Sharpe ≥ {active_proj.min_sharpe}\n- Sub-Universe Sharpe ≥ {active_proj.min_sub_universe_sharpe}")
         else:
             st.warning("No projects. Please create one.")
             st.session_state.current_project_id = None
@@ -238,6 +238,7 @@ with tab2:
             p_fit = st.number_input("Min Fitness Score Requirement", value=1.00, step=0.05)
             p_turn = st.number_input("Max Turnover Rate Limit", value=0.70, step=0.05)
             p_margin = st.number_input("Min Margin (in Basis Points)", value=4.0, step=0.5)
+            p_sub_sharpe = st.number_input("Min Sub-Universe Sharpe Requirement", value=1.00, step=0.05)
             
             if st.button("Submit Project Definition", type="primary"):
                 async def add_project():
@@ -254,7 +255,8 @@ with tab2:
                             min_sharpe=p_sharpe,
                             min_fitness=p_fit,
                             max_turnover=p_turn,
-                            min_margin=p_margin
+                            min_margin=p_margin,
+                            min_sub_universe_sharpe=p_sub_sharpe
                         )
                         db.add(proj)
                         await db.commit()
@@ -422,87 +424,92 @@ with tab4:
     if not st.session_state.current_project_id:
         st.warning("Please choose a Project first.")
     else:
-        # Pull live metrics
-        async def fetch_queue_stats():
-            async with AsyncSessionLocal() as db:
-                tot_pending = (await db.execute(
-                    select(Expression).where(Expression.project_id == st.session_state.current_project_id, Expression.status == "PENDING")
-                )).scalars().all()
-                tot_simulating = (await db.execute(
-                    select(Expression).where(Expression.project_id == st.session_state.current_project_id, Expression.status == "SIMULATING")
-                )).scalars().all()
-                return len(tot_pending), len(tot_simulating)
-                
-        pending_cnt, active_cnt = run_async(fetch_queue_stats())
-        
-        col_q1, col_q2, col_q3 = st.columns(3)
-        col_q1.metric("Pending Queue Length", pending_cnt)
-        col_q2.metric("Running Simulations", active_cnt)
-        col_q3.metric("Task Engine Concurrency Limit", "5 Workers")
-
-        st.divider()
-        st.subheader("Active Simulations Status")
-        
-        async def load_sim_list():
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    select(Simulation.brain_simulation_id, Expression.expression_text, Simulation.status, Simulation.updated_at, Simulation.error_message)
-                    .select_from(Simulation)
-                    .join(Expression, Simulation.expression_id == Expression.id)
-                    .where(Expression.project_id == st.session_state.current_project_id)
-                    .order_by(desc(Simulation.updated_at))
-                    .limit(20)
-                )
-                return list(result.all())
-                
-        sims_grid = run_async(load_sim_list())
-        if sims_grid:
-            grid_data = [
-                {
-                    "Sim ID": s[0] if s[0] else "N/A",
-                    "Alpha Formula": s[1],
-                    "API Status": s[2],
-                    "Last Checked": s[3].strftime("%H:%M:%S") if s[3] else "N/A",
-                    "Status Message": s[4] if s[4] else "Normal"
-                }
-                for s in sims_grid
-            ]
-            st.dataframe(pd.DataFrame(grid_data), use_container_width=True, height=350)
-        else:
-            st.info("No active simulations currently polling.")
+        @st.fragment(run_every=5)
+        def show_live_queue():
+            # Pull live metrics
+            async def fetch_queue_stats():
+                async with AsyncSessionLocal() as db:
+                    tot_pending = (await db.execute(
+                        select(Expression).where(Expression.project_id == st.session_state.current_project_id, Expression.status == "PENDING")
+                    )).scalars().all()
+                    tot_simulating = (await db.execute(
+                        select(Expression).where(Expression.project_id == st.session_state.current_project_id, Expression.status == "SIMULATING")
+                    )).scalars().all()
+                    return len(tot_pending), len(tot_simulating)
+                    
+            pending_cnt, active_cnt = run_async(fetch_queue_stats())
             
-        # Display Logs Expanders
-        st.divider()
-        with st.expander("📄 Mining Farm Action Logs"):
-            async def get_logs_db():
+            col_q1, col_q2, col_q3 = st.columns(3)
+            col_q1.metric("Pending Queue Length", pending_cnt)
+            col_q2.metric("Running Simulations", active_cnt)
+            col_q3.metric("Task Engine Concurrency Limit", "5 Workers")
+
+            st.divider()
+            st.subheader("Active Simulations Status")
+            
+            async def load_sim_list():
                 async with AsyncSessionLocal() as db:
                     result = await db.execute(
-                        select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message)
-                        .where(ProjectLog.project_id == st.session_state.current_project_id)
-                        .order_by(desc(ProjectLog.created_at))
-                        .limit(30)
+                        select(Simulation.brain_simulation_id, Expression.expression_text, Simulation.status, Simulation.updated_at, Simulation.error_message)
+                        .select_from(Simulation)
+                        .join(Expression, Simulation.expression_id == Expression.id)
+                        .where(Expression.project_id == st.session_state.current_project_id)
+                        .order_by(desc(Simulation.updated_at))
+                        .limit(20)
                     )
                     return list(result.all())
-            logs_list = run_async(get_logs_db())
-            
-            for log_row in logs_list:
-                ts = log_row[0].strftime("%Y-%m-%d %H:%M:%S")
-                level = log_row[1]
-                msg = log_row[2]
+                    
+            sims_grid = run_async(load_sim_list())
+            if sims_grid:
+                grid_data = [
+                    {
+                        "Sim ID": s[0] if s[0] else "N/A",
+                        "Alpha Formula": s[1],
+                        "API Status": s[2],
+                        "Last Checked": s[3].strftime("%H:%M:%S") if s[3] else "N/A",
+                        "Status Message": s[4] if s[4] else "Normal"
+                    }
+                    for s in sims_grid
+                ]
+                st.dataframe(pd.DataFrame(grid_data), use_container_width=True, height=350)
+            else:
+                st.info("No active simulations currently polling.")
                 
-                if level == "SUCCESS":
-                    st.write(f"🟢 [{ts}] **{msg}**")
-                elif level == "WARNING":
-                    st.write(f"🟡 [{ts}] {msg}")
-                elif level == "ERROR":
-                    st.write(f"🔴 [{ts}] **{msg}**")
-                else:
-                    st.write(f"⚪ [{ts}] {msg}")
+            # Display Logs Expanders
+            st.divider()
+            with st.expander("📄 Mining Farm Action Logs"):
+                async def get_logs_db():
+                    async with AsyncSessionLocal() as db:
+                        result = await db.execute(
+                            select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message)
+                            .where(ProjectLog.project_id == st.session_state.current_project_id)
+                            .order_by(desc(ProjectLog.created_at))
+                            .limit(30)
+                        )
+                        return list(result.all())
+                logs_list = run_async(get_logs_db())
+                
+                for log_row in logs_list:
+                    ts = log_row[0].strftime("%Y-%m-%d %H:%M:%S")
+                    level = log_row[1]
+                    msg = log_row[2]
+                    
+                    if level == "SUCCESS":
+                        st.write(f"🟢 [{ts}] **{msg}**")
+                    elif level == "WARNING":
+                        st.write(f"🟡 [{ts}] {msg}")
+                    elif level == "ERROR":
+                        st.write(f"🔴 [{ts}] **{msg}**")
+                    else:
+                        st.write(f"⚪ [{ts}] {msg}")
+                        
+        show_live_queue()
 
 # ----------------- TAB 5: ANALYTICS -----------------
 with tab5:
     st.header("📊 Batch Analytics Performance Overview")
     
+    st.write(f"DEBUG: Active Project ID = {st.session_state.current_project_id}")
     if not st.session_state.current_project_id:
         st.warning("Please choose a Project.")
     else:
@@ -518,6 +525,7 @@ with tab5:
                 return list(result.all())
                 
         metrics_rows = run_async(get_all_metrics())
+        st.write(f"DEBUG: Metrics query returned {len(metrics_rows)} rows.")
         
         if len(metrics_rows) < 1:
             st.info("Farming analytics reports will populate once backtests begin completing.")
@@ -578,11 +586,39 @@ with tab5:
                 st.subheader("Generator Performance Averages")
                 df_grp = df_metrics.groupby("Generator").mean().reset_index()
                 st.dataframe(df_grp, use_container_width=True)
+                
+            st.divider()
+            st.subheader("🔗 Passed Alphas Mutual Correlation Matrix")
+            async def get_passed_for_corr():
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(Expression.expression_text)
+                        .where(Expression.project_id == st.session_state.current_project_id, Expression.status == "PASSED")
+                    )
+                    return [r[0] for r in result.all()]
+            
+            passed_exprs = run_async(get_passed_for_corr())
+            if len(passed_exprs) < 2:
+                st.info("Passed alphas correlation matrix will appear once at least 2 alphas pass validation.")
+            else:
+                from brain_farm.app.services.correlation_filter import CorrelationFilter
+                corr_matrix = []
+                for e1 in passed_exprs:
+                    row = {}
+                    for e2 in passed_exprs:
+                        if e1 == e2:
+                            row[e2[:25]+"..."] = 1.0
+                        else:
+                            row[e2[:25]+"..."] = round(CorrelationFilter.calculate_correlation(e1, e2), 3)
+                    corr_matrix.append(row)
+                df_corr = pd.DataFrame(corr_matrix, index=[e[:25]+"..." for e in passed_exprs])
+                st.dataframe(df_corr, use_container_width=True)
 
 # ----------------- TAB 6: PASSED RESULTS -----------------
 with tab6:
     st.header("🏆 Qualified Alpha Discoveries")
     
+    st.write(f"DEBUG: Active Project ID = {st.session_state.current_project_id}")
     if not st.session_state.current_project_id:
         st.warning("Please choose a Project.")
     else:
@@ -599,6 +635,7 @@ with tab6:
                 return list(result.all())
                 
         passed_rows = run_async(fetch_passed_alphas())
+        st.write(f"DEBUG: Passed results query returned {len(passed_rows)} rows.")
         
         if not passed_rows:
             st.info("No Alphas meet all passing criteria filters yet. Start a mining batch tab above!")

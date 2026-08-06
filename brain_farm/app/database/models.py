@@ -43,6 +43,7 @@ class Project(Base):
     min_fitness: Mapped[float] = mapped_column(Float, default=1.00)
     max_turnover: Mapped[float] = mapped_column(Float, default=0.70)
     min_margin: Mapped[float] = mapped_column(Float, default=4.0)  # bps
+    min_sub_universe_sharpe: Mapped[float] = mapped_column(Float, default=1.0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
