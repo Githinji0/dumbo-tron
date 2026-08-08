@@ -320,7 +320,11 @@ class BrainClient:
                 retry_after = res.headers.get("Retry-After", "10")
                 return None, f"RATE_LIMIT:{retry_after}"
             if res.status_code in (401, 403):
-                self.is_authenticated = False
+                # Confirm session is truly dead before poisoning the flag.
+                # A single 401 can be a transient API hiccup.
+                alive, _ = await self.check_session()
+                if not alive:
+                    self.is_authenticated = False
                 return None, "Session expired during submission. Please re-authenticate."
             return None, f"API Error {res.status_code}: {res.text}"
         except Exception as e:
@@ -393,7 +397,9 @@ class BrainClient:
             if res.status_code == 424:
                 return None, "Dependency failed."
             if res.status_code in (401, 403):
-                self.is_authenticated = False
+                alive, _ = await self.check_session()
+                if not alive:
+                    self.is_authenticated = False
                 return None, "Session expired. Please re-authenticate."
             return None, f"API Error {res.status_code}: {res.text}"
         except Exception as e:

@@ -33,36 +33,31 @@ class SimulationWorker:
         logger.info(f"Injected authenticated client for user_id={user_id} (live={not client.use_mock})")
 
     async def get_client_for_user(self, user_id: int) -> Optional[BrainClient]:
-        """Gets or creates an authenticated BrainClient for a given user ID."""
+        """Returns the injected authenticated BrainClient for a user, or None.
+
+        NOTE: The worker never attempts automatic re-authentication. The live
+        BRAIN API requires an OTP delivered via email, which cannot be handled
+        in the background. When the session is gone, simulations are marked as
+        NEEDS_AUTH and will be retried automatically once the user logs in again
+        through the UI Auth panel.
+        """
         if user_id in self._active_clients:
             client = self._active_clients[user_id]
-            # Verify the cached client is still authenticated
             if client.is_authenticated:
                 return client
-            # Session expired — remove and fall through to re-auth below
+            # Session flagged as expired — evict so the UI can inject a fresh one.
+            logger.warning(
+                f"Worker: Cached session for user_id={user_id} is no longer valid. "
+                "Please re-authenticate through the UI Auth panel."
+            )
             del self._active_clients[user_id]
 
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
-            if not user:
-                return None
-
-            password = user.get_password()
-            client = BrainClient(email=user.email, password=password)
-            # Use step1 for live auth (streaming-safe) — falls back to mock on failure
-            success, msg = await client.authenticate_step1()
-            if success and msg != "OTP_SENT":
-                self._active_clients[user_id] = client
-                logger.info(f"Worker re-authenticated for user {user.email}")
-                return client
-            else:
-                logger.error(f"Worker auth failed for user {user.email}: {msg}")
-                # Fall back to mock mode so simulations don't silently block
-                mock_client = BrainClient(email=user.email, password=password, use_mock=True)
-                await mock_client.authenticate()
-                self._active_clients[user_id] = mock_client
-                return mock_client
+        # No valid session available — cannot re-auth automatically (OTP required).
+        logger.error(
+            f"Worker: No valid session for user_id={user_id}. "
+            "Simulations will be held as NEEDS_AUTH until the user re-authenticates."
+        )
+        return None
 
 
 
@@ -210,8 +205,8 @@ class SimulationWorker:
                 # Get authenticated client
                 client = await self.get_client_for_user(proj.user_id)
                 if not client:
-                    sim.status = "ERROR"
-                    sim.error_message = "Authentication credentials unavailable for processing."
+                    sim.status = "NEEDS_AUTH"
+                    sim.error_message = "Session expired. Please re-authenticate in the UI Auth panel."
                     await db.commit()
                     return
 
@@ -231,9 +226,19 @@ class SimulationWorker:
                     if "RATE_LIMIT" in err:
                         # Extract backoff timer in headers
                         backoff = int(err.split(":")[-1])
-                        # Log and delay submitting again (leave status as QUEUED for retries)
                         logger.warning(f"Submission rate-limited. Backing off for {backoff} seconds.")
                         await asyncio.sleep(backoff)
+                    elif "re-authenticate" in err.lower() or "session expired" in err.lower():
+                        # Session died mid-flight — hold sim for retry, evict stale client
+                        sim.status = "NEEDS_AUTH"
+                        sim.error_message = err
+                        expr.status = "PENDING"  # Reset so it's re-queued after re-auth
+                        self._active_clients.pop(proj.user_id, None)
+                        logger.warning(
+                            f"Session expired for user_id={proj.user_id} during submission. "
+                            "Sim held as NEEDS_AUTH. User must re-authenticate."
+                        )
+                        await db.commit()
                     else:
                         sim.status = "ERROR"
                         sim.error_message = err
@@ -252,21 +257,34 @@ class SimulationWorker:
                     await db.commit()
 
     async def poll_active_simulations(self):
-        """Polls status of simulations currently in POLLING state."""
+        """Polls status of simulations currently in POLLING state.
+        Also re-queues NEEDS_AUTH sims if a fresh session has been injected.
+        """
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(Simulation)
                 .join(Expression)
                 .join(Project)
                 .options(selectinload(Simulation.expression).selectinload(Expression.project))
-                .where(Simulation.status == "POLLING")
+                .where(Simulation.status.in_(["POLLING", "NEEDS_AUTH"]))
                 .limit(20)
             )
             sims = result.scalars().all()
 
             for sim in sims:
-                # Launch async status checker
+                if sim.status == "NEEDS_AUTH":
+                    # Only retry if a fresh session has been injected since the failure
+                    proj = sim.expression.project
+                    if proj.user_id in self._active_clients and self._active_clients[proj.user_id].is_authenticated:
+                        sim.status = "QUEUED"
+                        sim.error_message = None
+                        logger.info(f"NEEDS_AUTH sim {sim.id} re-queued after session restored.")
+                    continue  # Don't poll a sim with no brain_simulation_id
+
+                # Launch async status checker for POLLING sims
                 asyncio.create_task(self._poll_simulation_task(sim.id))
+
+            await db.commit()
 
     async def _poll_simulation_task(self, sim_id: int):
         async with AsyncSessionLocal() as db:
