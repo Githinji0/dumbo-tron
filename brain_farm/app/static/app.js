@@ -745,7 +745,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const detailTd = document.createElement("td");
         detailTd.style.color = statusLower === "error" ? "var(--error)" : "var(--text-secondary)";
-        detailTd.innerText = s.message;
+        if (s.status === "ERROR" && s.category && s.category !== "NORMAL") {
+          detailTd.innerHTML = `<code style="color: #ff5252; font-size: 0.85em; background: rgba(255, 82, 82, 0.1); padding: 2px 6px; border-radius: 4px; margin-right: 6px; border: 1px solid rgba(255, 82, 82, 0.2);">${s.category}</code> ${s.message}`;
+        } else {
+          detailTd.innerText = s.message;
+        }
 
         tr.appendChild(idTd);
         tr.appendChild(exprTd);

@@ -133,3 +133,40 @@ def test_brain_submit_all_registry_mock():
     data = response.json()
     assert "success" in data
     assert "submitted_count" in data
+
+def test_classify_error_string():
+    from brain_farm.app.server import classify_error_string
+    
+    # 1. Syntax Error
+    res = classify_error_string('API Error 400: {"regular": {"code": ["Syntax error in expression: unbalanced parentheses"]}}')
+    assert res["category"] == "ALPHA_SYNTAX_ERROR"
+    assert "Syntax error" in res["detail"]
+
+    # 2. Unknown Field
+    res = classify_error_string('API Error 400: {"regular": {"code": ["Unknown field: sector"]}}')
+    assert res["category"] == "UNKNOWN_FIELD"
+
+    # 3. Invalid Operator
+    res = classify_error_string('API Error 400: {"regular": {"code": ["Invalid operator: sign"]}}')
+    assert res["category"] == "INVALID_OPERATOR"
+
+    # 4. Invalid Parameter
+    res = classify_error_string('API Error 400: {"regular": {"code": ["Invalid parameter count for ts_mean"]}}')
+    assert res["category"] == "INVALID_PARAMETER"
+
+    # 5. Invalid Settings
+    res = classify_error_string('API Error 400: {"settings": {"universe": ["Invalid universe specified"]}}')
+    assert res["category"] == "INVALID_SETTINGS"
+
+    # 6. Payload Structure error
+    res = classify_error_string('API Error 400: {"regular": ["This field is required."]}')
+    assert res["category"] == "SIMULATION_PAYLOAD_ERROR"
+
+    # 7. Authentication Error
+    res = classify_error_string('API Error 401: Unauthorized session')
+    assert res["category"] == "AUTHENTICATION_ERROR"
+
+    # 8. Rate Limit Error
+    res = classify_error_string('RATE_LIMIT:15')
+    assert res["category"] == "RATE_LIMIT_ERROR"
+

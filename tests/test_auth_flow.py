@@ -114,3 +114,92 @@ async def test_auth_no_credential_leak(caplog):
         assert "my_super_secret_password_12345" not in logs_text
         assert "Authorization" not in logs_text
         assert "t=" not in logs_text
+
+@pytest.mark.asyncio
+async def test_simulation_payload_structure():
+    async with BrainClient("user@real.com", "password", use_mock=False) as client:
+        client.is_authenticated = True
+        
+        mock_response = httpx.Response(
+            status_code=201,
+            headers={"Location": "https://api.worldquantbrain.com/simulations/sim-12345"},
+            request=httpx.Request("POST", "https://api.worldquantbrain.com/simulations")
+        )
+        
+        with patch("httpx.AsyncClient.send", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = mock_response
+            
+            await client.submit_simulation("rank(close)", {"region": "USA", "universe": "TOP3000"})
+            
+            assert mock_send.call_count == 1
+            sent_request = mock_send.call_args[0][0]
+            import json
+            payload = json.loads(sent_request.read().decode('utf-8'))
+            
+            # Step 9: Validate regular structure matches API contract
+            assert payload["type"] == "REGULAR"
+            assert "regular" in payload
+            assert isinstance(payload["regular"], str)
+            assert payload["regular"] == "rank(close)"
+
+@pytest.mark.asyncio
+async def test_regular_payload_contains_string_expression():
+    async with BrainClient("user@real.com", "password", use_mock=False) as client:
+        client.is_authenticated = True
+        mock_response = httpx.Response(
+            status_code=201,
+            headers={"Location": "https://api.worldquantbrain.com/simulations/sim-12345"},
+            request=httpx.Request("POST", "https://api.worldquantbrain.com/simulations")
+        )
+        with patch("httpx.AsyncClient.send", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = mock_response
+            await client.submit_simulation("rank(close)", {"region": "USA", "universe": "TOP3000"})
+            sent_request = mock_send.call_args[0][0]
+            import json
+            payload = json.loads(sent_request.read().decode('utf-8'))
+            
+            assert payload["type"] == "REGULAR"
+            assert isinstance(payload["regular"], str)
+            assert payload["regular"] == "rank(close)"
+            assert "code" not in payload
+            assert not isinstance(payload["regular"], dict)
+
+@pytest.mark.asyncio
+async def test_simulation_payload_success_mock():
+    # Step 10: Mock BRAIN API for success returns
+    async with BrainClient("user@real.com", "password", use_mock=False) as client:
+        client.is_authenticated = True
+        
+        mock_response = httpx.Response(
+            status_code=201,
+            headers={"Location": "https://api.worldquantbrain.com/simulations/sim-98765"},
+            request=httpx.Request("POST", "https://api.worldquantbrain.com/simulations")
+        )
+        
+        with patch("httpx.AsyncClient.send", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = mock_response
+            sim_id, err = await client.submit_simulation("rank(close)", {"region": "USA", "universe": "TOP3000"})
+            assert err is None
+            assert sim_id == "sim-98765"
+
+@pytest.mark.asyncio
+async def test_simulation_payload_regression():
+    # Step 11: Regression check to avoid top-level 'code' property
+    async with BrainClient("user@real.com", "password", use_mock=False) as client:
+        client.is_authenticated = True
+        
+        mock_response = httpx.Response(
+            status_code=201,
+            headers={"Location": "https://api.worldquantbrain.com/simulations/sim-12345"},
+            request=httpx.Request("POST", "https://api.worldquantbrain.com/simulations")
+        )
+        
+        with patch("httpx.AsyncClient.send", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = mock_response
+            await client.submit_simulation("rank(close)", {"region": "USA", "universe": "TOP3000"})
+            
+            sent_request = mock_send.call_args[0][0]
+            import json
+            payload = json.loads(sent_request.read().decode('utf-8'))
+            assert "code" not in payload
+

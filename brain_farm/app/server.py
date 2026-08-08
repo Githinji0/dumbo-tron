@@ -591,6 +591,130 @@ async def submit_single(request: Request, req: SingleSubmissionRequest):
         await db.commit()
         return {"success": True, "message": "Enqueued manually submitted expression."}
 
+def classify_error_string(error_msg: str) -> Dict[str, str]:
+    if not error_msg:
+        return {"category": "NORMAL", "detail": "Normal"}
+        
+    import re
+    import json
+    
+    # Check rate limit
+    if "RATE_LIMIT" in error_msg:
+        return {
+            "category": "RATE_LIMIT_ERROR",
+            "detail": error_msg
+        }
+        
+    # Check session/auth
+    if "session expired" in error_msg.lower() or "please re-authenticate" in error_msg.lower() or "not authenticated" in error_msg.lower():
+        return {
+            "category": "AUTHENTICATION_ERROR",
+            "detail": error_msg
+        }
+
+    # Check network timeout/error
+    if "http request error" in error_msg.lower() or "http status error" in error_msg.lower() or "connection timed out" in error_msg.lower() or "network error" in error_msg.lower():
+        return {
+            "category": "NETWORK_ERROR",
+            "detail": error_msg
+        }
+
+    # Match API Error format: "API Error <status>: <content>"
+    match = re.match(r"API Error (\d+):\s*(.*)", error_msg, re.DOTALL)
+    if not match:
+        # Fallback keyword checks on the full message
+        txt = error_msg.lower()
+        if "syntax" in txt:
+            return {"category": "ALPHA_SYNTAX_ERROR", "detail": error_msg}
+        if "field" in txt:
+            return {"category": "UNKNOWN_FIELD", "detail": error_msg}
+        if "operator" in txt:
+            return {"category": "INVALID_OPERATOR", "detail": error_msg}
+        if "parameter" in txt:
+            return {"category": "INVALID_PARAMETER", "detail": error_msg}
+        return {"category": "SERVER_ERROR", "detail": error_msg}
+
+    status_code = int(match.group(1))
+    content = match.group(2).strip()
+
+    if status_code in (401, 403):
+        return {
+            "category": "AUTHENTICATION_ERROR",
+            "detail": "Session expired or invalid. Please re-authenticate."
+        }
+    if status_code == 429:
+        return {
+            "category": "RATE_LIMIT_ERROR",
+            "detail": "Rate limit exceeded. Please wait before retrying."
+        }
+    if status_code >= 500:
+        return {
+            "category": "SERVER_ERROR",
+            "detail": f"WorldQuant BRAIN service error ({status_code})."
+        }
+
+    # Attempt to parse json body
+    try:
+        data = json.loads(content)
+    except Exception:
+        data = None
+
+    if isinstance(data, dict):
+        if "regular" in data:
+            reg_err = data["regular"]
+            # Look for payload structure error
+            if isinstance(reg_err, list) and any("required" in str(x).lower() for x in reg_err):
+                return {
+                    "category": "SIMULATION_PAYLOAD_ERROR",
+                    "detail": "Simulation payload missing 'regular' expression object."
+                }
+            # Look for formula error or detail dict
+            if isinstance(reg_err, dict) and "code" in reg_err:
+                code_msgs = reg_err["code"]
+                msg = " ".join(str(m) for m in code_msgs) if isinstance(code_msgs, list) else str(code_msgs)
+                msg_lower = msg.lower()
+                
+                category = "ALPHA_SYNTAX_ERROR"
+                if "syntax" in msg_lower or "parse" in msg_lower or "unbalanced" in msg_lower:
+                    category = "ALPHA_SYNTAX_ERROR"
+                elif "unknown field" in msg_lower or "field not found" in msg_lower or "invalid field" in msg_lower or "does not exist" in msg_lower:
+                    category = "UNKNOWN_FIELD"
+                elif "unknown operator" in msg_lower or "invalid operator" in msg_lower or "function not found" in msg_lower:
+                    category = "INVALID_OPERATOR"
+                elif "parameter" in msg_lower or "arguments" in msg_lower or "count mismatch" in msg_lower:
+                    category = "INVALID_PARAMETER"
+                
+                return {"category": category, "detail": msg}
+            if isinstance(reg_err, list):
+                msg = " ".join(str(m) for m in reg_err)
+                category = "ALPHA_SYNTAX_ERROR" if "syntax" in msg.lower() else "SIMULATION_PAYLOAD_ERROR"
+                return {"category": category, "detail": msg}
+
+        if "code" in data and isinstance(data["code"], list) and any("unexpected" in str(x).lower() for x in data["code"]):
+            return {
+                "category": "SIMULATION_PAYLOAD_ERROR",
+                "detail": "Simulation payload contains unexpected top-level property."
+            }
+        if "settings" in data:
+            return {
+                "category": "INVALID_SETTINGS",
+                "detail": f"Invalid settings configuration: {data['settings']}"
+            }
+            
+    # Fallback to simple keyword parsing
+    txt = content.lower()
+    if "syntax" in txt or "parse" in txt:
+        return {"category": "ALPHA_SYNTAX_ERROR", "detail": content}
+    if "field" in txt:
+        return {"category": "UNKNOWN_FIELD", "detail": content}
+    if "operator" in txt:
+        return {"category": "INVALID_OPERATOR", "detail": content}
+    if "parameter" in txt:
+        return {"category": "INVALID_PARAMETER", "detail": content}
+        
+    return {"category": "SERVER_ERROR", "detail": content}
+
+
 @app.get("/api/queue")
 async def get_queue_stats(project_id: int):
     async with AsyncSessionLocal() as db:
@@ -615,16 +739,23 @@ async def get_queue_stats(project_id: int):
             .order_by(desc(Simulation.updated_at))
             .limit(25)
         )
-        sim_list = [
-            {
-                "sim_id": s[0] if s[0] else "N/A",
-                "expression": s[1],
-                "status": s[2],
-                "last_checked": s[3].strftime("%H:%M:%S") if s[3] else "N/A",
-                "message": s[4] if s[4] else "Normal"
-            }
-            for s in result_sims.all()
-        ]
+        sim_list = []
+        for s in result_sims.all():
+            sim_id = s[0] if s[0] else "N/A"
+            expr_text = s[1]
+            status_val = s[2]
+            updated_at = s[3].strftime("%H:%M:%S") if s[3] else "N/A"
+            raw_msg = s[4]
+            
+            c_info = classify_error_string(raw_msg) if status_val == "ERROR" else {"category": "NORMAL", "detail": raw_msg or "Normal"}
+            sim_list.append({
+                "sim_id": sim_id,
+                "expression": expr_text,
+                "status": status_val,
+                "last_checked": updated_at,
+                "category": c_info.get("category", "NORMAL"),
+                "message": c_info.get("detail", "Normal")
+            })
         
         return {
             "pending_count": pending_cnt,

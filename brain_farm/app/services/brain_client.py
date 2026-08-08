@@ -73,8 +73,19 @@ class BrainClient:
             clean_auth = "[REDACTED]" if "auth" in kwargs else None
             client_cookies = "[REDACTED]" if self.client and self.client.cookies else None
             
+            clean_json = None
+            if "json" in kwargs and kwargs["json"] is not None:
+                import copy
+                clean_json = copy.deepcopy(kwargs["json"])
+                if isinstance(clean_json, dict):
+                    for k in list(clean_json.keys()):
+                        if k.lower() in ("password", "token", "secret", "otp"):
+                            clean_json[k] = "[REDACTED]"
+                    if "authentication" in url.lower() and "code" in clean_json:
+                        clean_json["code"] = "[REDACTED]"
+            
             logger.info(
-                f"[BRAIN_DEBUG] API Request: {method} {url} | Headers: {clean_headers} | Auth: {clean_auth} | Client Cookies: {client_cookies}"
+                f"[BRAIN_DEBUG] API Request: {method} {url} | Headers: {clean_headers} | Auth: {clean_auth} | Client Cookies: {client_cookies} | Payload: {clean_json}"
             )
             
         start_time = time.time()
@@ -379,7 +390,7 @@ class BrainClient:
                 "language": "FASTEXPR",
                 "visualization": False,
             },
-            "code": expression,
+            "regular": expression
         }
 
         try:
