@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WorldQuant BRAIN Alpha Farm Platform</title>
+  <!-- Google Fonts Poppins -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- ApexCharts CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Sidebar Selector -->
+    <aside class="sidebar">
+      <div class="profile-section">
+        <div class="avatar" id="avatarIcon">?</div>
+        <div class="user-details">
+          <h4 id="userDisplayName">Guest</h4>
+          <p id="userEmailAddress">Not signed in</p>
+          <span class="badge" id="modeBadge">OFFLINE</span>
+          <div class="session-info" id="sessionInfoDetails"></div>
+        </div>
+      </div>
+      
+      <hr class="divider">
+      
+      <nav class="nav-menu">
+        <h3>Platform Views</h3>
+        <ul>
+          <li><button class="nav-btn active" data-view="auth-setup"><i data-lucide="shield-check"></i> Auth & Setup</button></li>
+          <li><button class="nav-btn" data-view="projects-config"><i data-lucide="settings"></i> Projects Config</button></li>
+          <li><button class="nav-btn" data-view="farming-run"><i data-lucide="cpu"></i> Alpha Farming Run</button></li>
+          <li><button class="nav-btn" data-view="live-queue"><i data-lucide="activity"></i> Live Queue</button></li>
+          <li><button class="nav-btn" data-view="analytics"><i data-lucide="bar-chart-2"></i> Analytics</button></li>
+          <li><button class="nav-btn" data-view="passed-results"><i data-lucide="award"></i> Passed Results</button></li>
+        </ul>
+      </nav>
+      
+      <hr class="divider">
+      
+      <div class="project-selector">
+        <label for="activeProjectSelect">Active Farming Project</label>
+        <select id="activeProjectSelect"></select>
+        <div class="project-summary-box" id="projectSummaryInfo">
+          <p class="placeholder-text">Please choose or create a project context.</p>
+        </div>
+      </div>
+      
+      <button class="logout-btn" id="logoutButton" style="display:none;"><i data-lucide="log-out"></i> Log Out</button>
+
+      <div class="footer-note">
+        Antigravity Coding © 2026
+      </div>
+    </aside>
+
+    <!-- Main View Panel -->
+    <main class="main-content">
+      <header class="main-header">
+        <h1>WorldQuant BRAIN Alpha Farm Platform</h1>
+        <div class="top-status-bar">
+          <span class="status-indicator live" id="workerRunningIndicator">
+            <span class="indicator-dot"></span> Background Worker Running
+          </span>
+        </div>
+      </header>
+
+      <!-- View Wrapper -->
+      <div class="view-content-wrapper">
+        
+        <!-- View 1: Auth and Setup -->
+        <section id="view-auth-setup" class="view-panel active">
+          <h2>Authorization Setup</h2>
+          <div class="grid-2col">
+            <div class="card card-form">
+              <h3>Credentials</h3>
+              
+              <!-- Credentials Step 1Form -->
+              <div id="authCredentialsFormPanel">
+                <div class="form-group">
+                  <label for="authEmailInput">BRAIN Account Email</label>
+                  <input type="email" id="authEmailInput" placeholder="developer@worldquant.com">
+                </div>
+                <div class="form-group">
+                  <label for="authPasswordInput">Password</label>
+                  <input type="password" id="authPasswordInput" placeholder="••••••••">
+                </div>
+                <div class="form-group checkbox-group">
+                  <input type="checkbox" id="authModeCheckbox" checked>
+                  <label for="authModeCheckbox">Simulated / Offline Sandbox Mode</label>
+                </div>
+                <div class="btn-row">
+                  <button class="btn btn-primary" id="btnSignInSubmit">Sign In</button>
+                  <button class="btn btn-secondary" id="btnCheckSessionSubmit">Check Session</button>
+                </div>
+              </div>
+
+              <!-- Verification OTP Form -->
+              <div id="authOtpFormPanel" style="display: none;">
+                <div class="alert alert-info">
+                  A verification one-time code (OTP) was sent to your email. Please enter it here.
+                </div>
+                <div class="form-group">
+                  <label for="authOtpInput">OTP Code</label>
+                  <input type="text" id="authOtpInput" placeholder="e.g. 123456" maxlength="10">
+                </div>
+                <div class="btn-row">
+                  <button class="btn btn-primary" id="btnVerifyOtpSubmit">Verify OTP</button>
+                  <button class="btn btn-secondary" id="btnCancelOtp">Cancel</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity Logging -->
+            <div class="card card-log">
+              <h3>Activity Log</h3>
+              <div class="logs-feed" id="authActivityLogsFeed">
+                <p class="placeholder-text">No logins or pings captured in this session.</p>
+              </div>
+              
+              <hr class="divider">
+              
+              <h3>Architecture Enclave</h3>
+              <ul class="bullet-list">
+                <li><strong>Secure Encryption:</strong> Cryptography cipher storing on SQLITE.</li>
+                <li><strong>Lifespan Async Worker:</strong> background threads replaced with clean FastAPI loops.</li>
+                <li><strong>Session Expiry Guard:</strong> Lightweight pings verify local tokens automatically.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 2: Projects Config -->
+        <section id="view-projects-config" class="view-panel">
+          <h2>Project Configurations Manager</h2>
+          <div class="auth-warning" id="projectsAuthWarning">
+            <i data-lucide="alert-triangle"></i> Please sign in on the Auth and Setup view to manage projects.
+          </div>
+          
+          <div class="grid-2col" id="projectsFormWrapper">
+            <div class="card">
+              <h3>Create New Project Context</h3>
+              <div class="form-group">
+                <label for="projNameInput">Project Name</label>
+                <input type="text" id="projNameInput" value="US Equities Momentum">
+              </div>
+              <div class="form-group">
+                <label for="projDescInput">Project Description</label>
+                <textarea id="projDescInput" rows="2">Farming alphas targeting US Mid & Large Cap equities using momentum lookbacks.</textarea>
+              </div>
+              
+              <div class="grid-3col">
+                <div class="form-group">
+                  <label for="projRegionSelect">Region Pool</label>
+                  <select id="projRegionSelect">
+                    <option value="USA" selected>USA</option>
+                    <option value="GLB">GLB</option>
+                    <option value="CHN">CHN</option>
+                    <option value="EUR">EUR</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="projUniverseSelect">Universe Size</label>
+                  <select id="projUniverseSelect">
+                    <option value="TOP3000" selected>TOP3000</option>
+                    <option value="TOP2000">TOP2000</option>
+                    <option value="TOP1000">TOP1000</option>
+                    <option value="TOP500">TOP500</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="projNeutralizationSelect">Neutralization</label>
+                  <select id="projNeutralizationSelect">
+                    <option value="SUBINDUSTRY" selected>SUBINDUSTRY</option>
+                    <option value="INDUSTRY">INDUSTRY</option>
+                    <option value="SECTOR">SECTOR</option>
+                    <option value="NONE">NONE</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid-2col">
+                <div class="form-group">
+                  <label>Signal Delay: <span id="delayVal">1</span></label>
+                  <input type="range" id="projDelayInput" min="0" max="2" value="1" oninput="document.getElementById('delayVal').innerText=this.value">
+                </div>
+                <div class="form-group">
+                  <label for="projDecayInput">Decay Days</label>
+                  <input type="number" id="projDecayInput" value="0" min="0" max="30">
+                </div>
+              </div>
+
+              <h3>Success Threshold Criteria</h3>
+              <div class="grid-2col">
+                <div class="form-group">
+                  <label for="projMinSharpe">Min Sharpe Ratio</label>
+                  <input type="number" id="projMinSharpe" value="1.25" step="0.05">
+                </div>
+                <div class="form-group">
+                  <label for="projMinFitness">Min Fitness Score</label>
+                  <input type="number" id="projMinFitness" value="1.00" step="0.05">
+                </div>
+                <div class="form-group">
+                  <label for="projMaxTurnover">Max Turnover Rate</label>
+                  <input type="number" id="projMaxTurnover" value="0.70" step="0.05">
+                </div>
+                <div class="form-group">
+                  <label for="projMinMargin">Min Margin (bps)</label>
+                  <input type="number" id="projMinMargin" value="4.0" step="0.5">
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="projMinSubSharpe">Min Sub-Universe Sharpe</label>
+                <input type="number" id="projMinSubSharpe" value="1.00" step="0.05">
+              </div>
+
+              <button class="btn btn-primary btn-full" id="btnSubmitProject">Submit Project Definition</button>
+            </div>
+
+            <!-- Fields Cache listing -->
+            <div class="card">
+              <div class="card-header-flex">
+                <h3>Data Fields Catalog</h3>
+                <button class="btn btn-secondary btn-sm" id="btnSyncFieldsCatalog"><i data-lucide="refresh-cw"></i> Sync Catalog</button>
+              </div>
+              <div class="search-catalog">
+                <input type="text" id="fieldsCatalogSearch" placeholder="Filter fields by category or code...">
+                <div class="checkbox-group" style="margin-top: 10px;">
+                  <input type="checkbox" id="fieldsFavoritesOnly">
+                  <label for="fieldsFavoritesOnly">Favorites Only</label>
+                </div>
+              </div>
+              <div class="table-container" style="max-height: 480px; overflow-y: auto;">
+                <table class="grid-table" id="fieldsCatalogTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 40px;">Fav</th>
+                      <th>Field ID</th>
+                      <th>Name</th>
+                      <th>Category</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td colspan="4" class="text-center">Loading cached catalog...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 3: Alpha Farming Run -->
+        <section id="view-farming-run" class="view-panel">
+          <h2>Generator Farm Controller</h2>
+          <div class="auth-warning" id="farmingProjectWarning">
+            <i data-lucide="alert-triangle"></i> Please choose or create a project context on the sidebar config.
+          </div>
+          
+          <div class="grid-2col" id="farmingRunFormWrapper">
+            <div class="card card-form">
+              <h3>Farming Parameters</h3>
+              <div class="form-group">
+                <label for="farmEngineSelect">Generation Approach Engine</label>
+                <select id="farmEngineSelect">
+                  <option value="Template Generator">Template Generator</option>
+                  <option value="Recursive AST Generator" selected>Recursive AST Generator</option>
+                  <option value="Mutation Engine">Mutation Engine</option>
+                  <option value="Genetic Crossover Engine">Genetic Crossover Engine</option>
+                  <option value="LLM-AI Optimizer">LLM-AI Optimizer</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label>Candidate Count to Queue: <span id="farmCountVal">30</span></label>
+                <input type="range" id="farmCountRange" min="1" max="200" value="30" oninput="document.getElementById('farmCountVal').innerText=this.value">
+              </div>
+
+              <div class="form-group" id="astDepthWrapper">
+                <label>Syntax Tree limits (max depth): <span id="astDepthVal">3</span></label>
+                <input type="range" id="astDepthRange" min="2" max="5" value="3" oninput="document.getElementById('astDepthVal').innerText=this.value">
+              </div>
+
+              <h3>Validator Pre-check Details</h3>
+              <ul class="bullet-list-small">
+                <li>Parses candidates before submitting to api endpoints.</li>
+                <li>Validates delay boundaries against historical databases.</li>
+                <li>Filters out nesting redundancies automatically.</li>
+              </ul>
+              
+              <button class="btn btn-primary btn-full" id="btnLaunchFarmingJob">Launch & Queue Farm Job</button>
+            </div>
+
+            <!-- Manual Submission -->
+            <div class="card card-form">
+              <h3>Manual Expression Submission</h3>
+              <p>Type a custom FastExpr expression to execute direct validation and simulation.</p>
+              <div class="form-group" style="margin-top: 15px;">
+                <label for="manualExpressionInput">FastExpr Code</label>
+                <input type="text" id="manualExpressionInput" value="group_neutralize(ts_decay_linear(rank(close), 10), subindustry)">
+              </div>
+              <button class="btn btn-secondary btn-full" id="btnSubmitManualExpression">Validate and Queue Single Alpha</button>
+              
+              <div id="manualSubmissionResultFeedback" style="margin-top: 15px;"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 4: Live Queue -->
+        <section id="view-live-queue" class="view-panel">
+          <h2>Background Simulations Status Monitor</h2>
+          <div class="auth-warning" id="queueProjectWarning">
+            <i data-lucide="alert-triangle"></i> Please choose or create a project context.
+          </div>
+          
+          <div id="queueStatsContent" class="stats-wrapper">
+            <!-- 3 Column Queue Stats -->
+            <div class="grid-3col">
+              <div class="card stat-card">
+                <div class="stat-icon"><i data-lucide="hourglass"></i></div>
+                <div class="stat-number" id="statQueuePending">0</div>
+                <div class="stat-label">Pending Queue Length</div>
+              </div>
+              <div class="card stat-card">
+                <div class="stat-icon"><i data-lucide="loader-2" class="spin"></i></div>
+                <div class="stat-number" id="statQueueRunning">0</div>
+                <div class="stat-label">Running Simulations</div>
+              </div>
+              <div class="card stat-card">
+                <div class="stat-icon"><i data-lucide="gauge"></i></div>
+                <div class="stat-number">5 Workers</div>
+                <div class="stat-label">Concurrency Limit</div>
+              </div>
+            </div>
+
+            <!-- Active Grid Table -->
+            <div class="card" style="margin-top: 25px;">
+              <h3>Active Simulation Status (Real-time polling)</h3>
+              <div class="table-container">
+                <table class="grid-table" id="queueSimulationsTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 140px;">Sim ID</th>
+                      <th>Alpha Formula</th>
+                      <th style="width: 120px;">API Status</th>
+                      <th style="width: 120px;">Last Checked</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td colspan="5" class="text-center">No simulation batches currently running...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Mining Farm action logs -->
+            <div class="card" style="margin-top: 25px;">
+              <div class="card-header-flex">
+                <h3>Mining Farm Live Logs</h3>
+                <button class="btn btn-secondary btn-sm" id="btnRefreshLogsQueue"><i data-lucide="refresh-cw"></i> Refresh Logs</button>
+              </div>
+              <div class="logs-feed" id="miningFarmLogsList" style="max-height: 250px;">
+                <p class="placeholder-text">No messages recorded yet for this project context.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 5: Analytics -->
+        <section id="view-analytics" class="view-panel">
+          <h2>Batch Analytics Performance Overview</h2>
+          <div class="auth-warning" id="analyticsProjectWarning">
+            <i data-lucide="alert-triangle"></i> Please choose or create a project context.
+          </div>
+          
+          <div id="analyticsContentWrapper">
+            <!-- No metrics placeholder -->
+            <div class="alert alert-info" id="analyticsEmptyAlert" style="display:none;">
+              Farming analytics reports will populate once backtests begin completing.
+            </div>
+
+            <div class="grid-2col" id="analyticsChartsGrid">
+              <!-- Sharpe vs Turnover scatterplot -->
+              <div class="card">
+                <h3>Alpha Sharpe Ratio vs Turnover</h3>
+                <div id="scatterChartWrapper" style="height: 350px;"></div>
+              </div>
+              
+              <!-- Fitness Densities -->
+              <div class="card">
+                <h3>Fitness Score Distributions</h3>
+                <div id="fitnessChartWrapper" style="height: 350px;"></div>
+              </div>
+              
+              <!-- Sharpe limits by engine -->
+              <div class="card">
+                <h3>Alpha Sharpe Density Ranges</h3>
+                <div id="sharpeRangesChartWrapper" style="height: 350px;"></div>
+              </div>
+              
+              <!-- Generator Performance Averages -->
+              <div class="card">
+                <h3>Generator Performance Statistics</h3>
+                <div class="table-container">
+                  <table class="grid-table" id="analyticsAveragesTable">
+                    <thead>
+                      <tr>
+                        <th>Generator Type</th>
+                        <th>Avg Sharpe</th>
+                        <th>Avg Fitness</th>
+                        <th>Avg Turnover (%)</th>
+                        <th>Avg Margin</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Jaccard Matrix/Correlation Matrix -->
+              <div class="card card-wide" id="correlationMatrixWrapper" style="display:none; grid-column: span 2;">
+                <h3>Passed Alphas Mutual Correlation Matrix</h3>
+                <div class="table-container">
+                  <table class="grid-table" id="analyticsCorrelationMatrixTable">
+                    <thead></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 6: Passed Results -->
+        <section id="view-passed-results" class="view-panel">
+          <h2>Qualified Alpha Discoveries</h2>
+          <div class="auth-warning" id="passedProjectWarning">
+            <i data-lucide="alert-triangle"></i> Please choose or create a project context.
+          </div>
+          
+          <div id="passedContentWrapper">
+            <!-- Table listing -->
+            <div class="card">
+              <h3>Qualified Passed Candidate Alphas</h3>
+              <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                <table class="grid-table" id="passedAlphasTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 140px;">Alpha ID</th>
+                      <th>Expression Formula</th>
+                      <th style="width: 80px;">Sharpe</th>
+                      <th style="width: 80px;">Fitness</th>
+                      <th style="width: 90px;">Turnover</th>
+                      <th style="width: 90px;">Margin</th>
+                      <th style="width: 110px;">Generator</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td colspan="7" class="text-center">No qualified passed alphas recorded in this project context.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Export and registry submission -->
+            <div class="grid-2col" style="margin-top: 25px;">
+              <div class="card">
+                <h3>Export & Report Controls</h3>
+                <p>Download the database records in standard format.</p>
+                <div class="btn-row" style="margin-top: 15px;">
+                  <button class="btn btn-secondary" id="btnExportCSV"><i data-lucide="download"></i> Export as CSV</button>
+                  <button class="btn btn-secondary" id="btnExportJSON"><i data-lucide="download"></i> Export as JSON</button>
+                </div>
+              </div>
+              <div class="card">
+                <h3>WorldQuant BRAIN Registry Submission</h3>
+                <p>Submit your qualified alpha candidate directly to the live WorldQuant BRAIN platform.</p>
+                
+                <div class="form-group" style="margin-top: 15px;">
+                  <label for="passedRegistryAlphaSelector">Select Passed Alpha ID</label>
+                  <select id="passedRegistryAlphaSelector">
+                    <option value="">No alphas available to register</option>
+                  </select>
+                </div>
+                <button class="btn btn-primary btn-full" id="btnSubmitToRegistry"><i data-lucide="send"></i> Submit Alpha to WorldQuant BRAIN Registry</button>
+                <div id="registryFeedbackMessage" style="margin-top: 10px;"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Javascript Core Logic -->
+  <script src="app.js"></script>
+</body>
+</html>

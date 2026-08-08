@@ -17,5 +17,5 @@ COPY . .
 # Expose Streamlit port
 EXPOSE 8501
 
-# Run the Streamlit Dashboard
-CMD ["streamlit", "run", "brain_farm/app/ui/main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Run the FastAPI Server
+CMD ["uvicorn", "brain_farm.app.server:app", "--host", "0.0.0.0", "--port", "8501"]

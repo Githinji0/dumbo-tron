@@ -1,0 +1,535 @@
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+import logging
+from typing import Dict, Any, List, Optional
+from fastapi import FastAPI, HTTPException, Response, Request, status, Query
+from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field as PydanticField
+
+from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload
+
+from brain_farm.app.database.session import make_session_factory, init_db
+from brain_farm.app.database.models import User, Project, Expression, Simulation, Metric, ProjectLog
+from brain_farm.app.services.brain_client import BrainClient
+from brain_farm.app.services.worker import SimulationWorker
+from brain_farm.app.services.field_manager import FieldManager, DEFAULT_FIELDS
+from brain_farm.app.evaluators.validator import FormulaValidator
+
+# Generators
+from brain_farm.app.generators.template import TemplateGenerator
+from brain_farm.app.generators.ast_gen import ASTGenerator
+from brain_farm.app.generators.mutation import MutationGenerator
+from brain_farm.app.generators.genetic import GeneticGenerator
+from brain_farm.app.generators.llm_gen import LLMGenerator
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("brain_farm.server")
+
+# Global async session factory
+AsyncSessionLocal = make_session_factory()
+
+# Background Simulation Worker instance
+simulation_worker = SimulationWorker(concurrency_limit=5)
+
+# Session state tracker in-memory dictionary.
+# Tracks active user sessions, keeping mapping of user_id -> {client, username, mode, start_time}
+# and OTP workflow states.
+active_sessions: Dict[int, Dict[str, Any]] = {}
+otp_auth_states: Dict[str, Dict[str, Any]] = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize DB tables
+    logger.info("Initializing database tables...")
+    await init_db()
+    
+    # Start background loop
+    logger.info("Starting background simulation worker...")
+    await simulation_worker.start()
+    
+    yield
+    
+    # Stop background loop
+    logger.info("Stopping background simulation worker...")
+    await simulation_worker.stop()
+
+app = FastAPI(title="WorldQuant BRAIN Alpha Farm Platform API", lifespan=lifespan)
+
+# Helper to verify auth from request header
+async def get_current_user_id(request: Request) -> int:
+    user_id_str = request.headers.get("X-User-ID")
+    if not user_id_str:
+        user_id_cookie = request.cookies.get("session_user_id")
+        if not user_id_cookie:
+            raise HTTPException(status_code=401, detail="Header X-User-ID or session_user_id cookie is required.")
+        user_id_str = user_id_cookie
+    try:
+        return int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid user ID format.")
+
+# API schemas
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    use_mock: bool = True
+
+class OTPVerifyRequest(BaseModel):
+    email: str
+    otp_code: str
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    region: str = "USA"
+    universe: str = "TOP3000"
+    neutralization: str = "SUBINDUSTRY"
+    delay: int = 1
+    decay: int = 0
+    min_sharpe: float = 1.25
+    min_fitness: float = 1.00
+    max_turnover: float = 0.70
+    min_margin: float = 4.0
+    min_sub_universe_sharpe: float = 1.00
+
+class FieldFavoriteToggle(BaseModel):
+    field_id: str
+
+class FieldSyncRequest(BaseModel):
+    region: str = "USA"
+    universe: str = "TOP3000"
+
+class LaunchFarmRequest(BaseModel):
+    project_id: int
+    engine: str
+    count: int
+    ast_depth: int = 3
+
+class SingleSubmissionRequest(BaseModel):
+    project_id: int
+    expression: str
+
+class RegistrySubmitRequest(BaseModel):
+    alpha_id: str
+
+# Endpoints
+@app.get("/")
+def read_root():
+    return RedirectResponse(url="/static/index.html")
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    try:
+        user_id = await get_current_user_id(request)
+        session = active_sessions.get(user_id)
+        if not session:
+            return {"authenticated": False, "username": "", "is_mock": True}
+        
+        # Calculate session age
+        age_min = int((datetime.utcnow() - session["start_time"]).total_seconds() / 60)
+        return {
+            "authenticated": True,
+            "username": session["username"],
+            "is_mock": session["is_mock"],
+            "session_age_minutes": age_min,
+            "user_id": user_id
+        }
+    except HTTPException:
+        return {"authenticated": False, "username": "", "is_mock": True}
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    email = req.email.strip()
+    password = req.password
+    use_mock = req.use_mock
+    
+    # Setup fresh client context
+    client = BrainClient(email, password, use_mock=use_mock)
+    success, msg = await client.authenticate_step1()
+    
+    if success and msg == "OTP_SENT":
+        # Store state for step 2
+        otp_auth_states[email] = {
+            "client": client,
+            "password": password,
+            "use_mock": use_mock
+        }
+        return {"success": True, "otp_pending": True, "message": "OTP has been sent to your email."}
+    
+    if success:
+        return await finalize_user_login(email, password, use_mock, client, "Live Session authenticated successfully!")
+    
+    return JSONResponse(status_code=400, content={"success": False, "otp_pending": False, "message": msg})
+
+@app.post("/api/auth/verify-otp")
+async def auth_verify_otp(req: OTPVerifyRequest):
+    email = req.email.strip()
+    otp_code = req.otp_code.strip()
+    
+    saved_state = otp_auth_states.get(email)
+    if not saved_state:
+        raise HTTPException(status_code=400, detail="OTP state not found. Start Sign-in again.")
+        
+    client = saved_state["client"]
+    password = saved_state["password"]
+    use_mock = saved_state["use_mock"]
+    
+    success, msg = await client.authenticate_step2(otp_code)
+    if success:
+        otp_auth_states.pop(email, None)
+        return await finalize_user_login(email, password, use_mock, client, msg)
+        
+    return JSONResponse(status_code=400, content={"success": False, "message": msg})
+
+async def finalize_user_login(email: str, password: str, use_mock: bool, client: BrainClient, success_msg: str):
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(select(User).where(User.email == email))
+        user = res.scalar_one_or_none()
+        if use_mock and user:
+            if user.get_password() != password:
+                raise HTTPException(status_code=400, detail="Password does not match registered mock credentials.")
+        if not user:
+            user = User(email=email)
+            user.set_password(password)
+            db.add(user)
+        else:
+            user.set_password(password)
+        await db.commit()
+        user_id = user.id
+
+    # Inject client to background worker
+    simulation_worker.inject_client(user_id, client)
+    
+    # Store session details
+    active_sessions[user_id] = {
+        "client": client,
+        "username": email,
+        "is_mock": use_mock,
+        "start_time": datetime.utcnow()
+    }
+    
+    # Silently seed/sync data fields cache in the background
+    async def run_cache_sync():
+        async with AsyncSessionLocal() as db:
+            fields = await FieldManager.get_all_fields(db)
+            if len(fields) <= len(DEFAULT_FIELDS) or use_mock:
+                await FieldManager.sync_cache_with_api(db, client, "USA", "TOP3000")
+                
+    asyncio.create_task(run_cache_sync())
+    
+    response = JSONResponse({
+        "success": True,
+        "otp_pending": False,
+        "message": success_msg,
+        "user_id": user_id,
+        "username": email,
+        "is_mock": use_mock
+    })
+    response.set_cookie(key="session_user_id", value=str(user_id), max_age=86400)
+    return response
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    user_id = await get_current_user_id(request)
+    session = active_sessions.pop(user_id, None)
+    if session and session["client"] and session["client"].client:
+        try:
+            await session["client"].client.aclose()
+        except Exception:
+            pass
+    # Clean client from worker
+    simulation_worker._active_clients.pop(user_id, None)
+    
+    response.delete_cookie(key="session_user_id")
+    return {"success": True}
+
+@app.get("/api/projects")
+async def get_projects(request: Request):
+    user_id = await get_current_user_id(request)
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(select(Project).where(Project.user_id == user_id).order_by(desc(Project.created_at)))
+        projects = res.scalars().all()
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "region": p.region,
+                "universe": p.universe,
+                "neutralization": p.neutralization,
+                "delay": p.delay,
+                "decay": p.decay,
+                "min_sharpe": p.min_sharpe,
+                "min_fitness": p.min_fitness,
+                "max_turnover": p.max_turnover,
+                "min_margin": p.min_margin,
+                "min_sub_universe_sharpe": p.min_sub_universe_sharpe,
+                "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            for p in projects
+        ]
+
+@app.post("/api/projects")
+async def create_project(request: Request, req: ProjectCreateRequest):
+    user_id = await get_current_user_id(request)
+    async with AsyncSessionLocal() as db:
+        proj = Project(
+            user_id=user_id,
+            name=req.name,
+            description=req.description,
+            region=req.region,
+            universe=req.universe,
+            neutralization=req.neutralization,
+            delay=req.delay,
+            decay=req.decay,
+            min_sharpe=req.min_sharpe,
+            min_fitness=req.min_fitness,
+            max_turnover=req.max_turnover,
+            min_margin=req.min_margin,
+            min_sub_universe_sharpe=req.min_sub_universe_sharpe
+        )
+        db.add(proj)
+        await db.commit()
+        return {"success": True, "project_id": proj.id}
+
+@app.get("/api/fields")
+async def get_fields(query: Optional[str] = None, favorite_only: bool = False):
+    async with AsyncSessionLocal() as db:
+        fields = await FieldManager.search_fields(db, query or "", favorite_only)
+        return [
+            {
+                "id": f.id,
+                "name": f.name,
+                "dataset": f.dataset,
+                "category": f.category,
+                "region": f.region,
+                "universe": f.universe,
+                "description": f.description,
+                "type": f.type,
+                "is_favorite": f.is_favorite
+            }
+            for f in fields
+        ]
+
+@app.post("/api/fields/toggle-favorite")
+async def toggle_field_favorite(req: FieldFavoriteToggle):
+    async with AsyncSessionLocal() as db:
+        is_fav = await FieldManager.toggle_favorite(db, req.field_id)
+        return {"success": True, "is_favorite": is_fav}
+
+@app.post("/api/fields/sync")
+async def sync_fields(request: Request, req: FieldSyncRequest):
+    user_id = await get_current_user_id(request)
+    session = active_sessions.get(user_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Active auth context missing.")
+    
+    async with AsyncSessionLocal() as db:
+        count = await FieldManager.sync_cache_with_api(db, session["client"], req.region, req.universe)
+        return {"success": True, "count": count}
+
+@app.post("/api/farm/launch")
+async def launch_farm(request: Request, req: LaunchFarmRequest):
+    user_id = await get_current_user_id(request)
+    
+    async with AsyncSessionLocal() as db:
+        # Load fields
+        res_fields = await FieldManager.get_all_fields(db)
+        p_fields = [f.id for f in res_fields]
+        
+        # Generator initialization
+        if req.engine == "Template Generator":
+            generator = TemplateGenerator(p_fields)
+            candidates = generator.generate(req.count)
+        elif req.engine == "Recursive AST Generator":
+            generator = ASTGenerator(p_fields, max_depth=req.ast_depth)
+            candidates = generator.generate(req.count)
+        elif req.engine == "Mutation Engine":
+            # Load top formulas to mutate
+            result = await db.execute(
+                select(Expression.expression_text)
+                .where(Expression.project_id == req.project_id)
+                .limit(20)
+            )
+            parents = [r[0] for r in result.all()]
+            generator = MutationGenerator(p_fields)
+            candidates = generator.generate(req.count, base_formulas=parents)
+        elif req.engine == "Genetic Crossover Engine":
+            # Fetch formulas with metrics
+            result = await db.execute(
+                select(Expression.expression_text, Metric.sharpe)
+                .join(Simulation)
+                .join(Metric)
+                .where(Expression.project_id == req.project_id)
+            )
+            pool = [(r[0], r[1]) for r in result.all()]
+            generator = GeneticGenerator(p_fields)
+            candidates = generator.generate(req.count, population_history=pool)
+        elif req.engine == "LLM-AI Optimizer":
+            generator = LLMGenerator(p_fields)
+            candidates = generator.generate(req.count)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid generator engine.")
+            
+        # Insert Expressions to DB as PENDING
+        for text in candidates:
+            expr_db = Expression(
+                project_id=req.project_id,
+                expression_text=text,
+                generator_type=req.engine.split()[0],
+                status="PENDING"
+            )
+            db.add(expr_db)
+            
+        await db.commit()
+        return {"success": True, "queued_count": len(candidates)}
+
+@app.post("/api/farm/submit-single")
+async def submit_single(request: Request, req: SingleSubmissionRequest):
+    user_id = await get_current_user_id(request)
+    
+    async with AsyncSessionLocal() as db:
+        res = await FieldManager.get_all_fields(db)
+        p_fields = [f.id for f in res]
+        
+        ok, reason = FormulaValidator.validate(req.expression, p_fields)
+        if not ok:
+            return JSONResponse(status_code=400, content={"success": False, "message": f"Syntax Error: {reason}"})
+            
+        expr = Expression(
+            project_id=req.project_id,
+            expression_text=req.expression,
+            generator_type="MANUAL",
+            status="PENDING"
+        )
+        db.add(expr)
+        await db.commit()
+        return {"success": True, "message": "Enqueued manually submitted expression."}
+
+@app.get("/api/queue")
+async def get_queue_stats(project_id: int):
+    async with AsyncSessionLocal() as db:
+        # Pending countdown
+        res_pending = await db.execute(
+            select(Expression).where(Expression.project_id == project_id, Expression.status == "PENDING")
+        )
+        pending_cnt = len(res_pending.scalars().all())
+        
+        # Simulating active
+        res_active = await db.execute(
+            select(Expression).where(Expression.project_id == project_id, Expression.status == "SIMULATING")
+        )
+        active_cnt = len(res_active.scalars().all())
+        
+        # Details grid
+        result_sims = await db.execute(
+            select(Simulation.brain_simulation_id, Expression.expression_text, Simulation.status, Simulation.updated_at, Simulation.error_message)
+            .select_from(Simulation)
+            .join(Expression, Simulation.expression_id == Expression.id)
+            .where(Expression.project_id == project_id)
+            .order_by(desc(Simulation.updated_at))
+            .limit(25)
+        )
+        sim_list = [
+            {
+                "sim_id": s[0] if s[0] else "N/A",
+                "expression": s[1],
+                "status": s[2],
+                "last_checked": s[3].strftime("%H:%M:%S") if s[3] else "N/A",
+                "message": s[4] if s[4] else "Normal"
+            }
+            for s in result_sims.all()
+        ]
+        
+        return {
+            "pending_count": pending_cnt,
+            "running_count": active_cnt,
+            "concurrency_limit": 5,
+            "simulations": sim_list
+        }
+
+@app.get("/api/logs")
+async def get_logs(project_id: int):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message)
+            .where(ProjectLog.project_id == project_id)
+            .order_by(desc(ProjectLog.created_at))
+            .limit(40)
+        )
+        return [
+            {
+                "timestamp": log[0].strftime("%Y-%m-%d %H:%M:%S"),
+                "level": log[1],
+                "message": log[2]
+            }
+            for log in result.all()
+        ]
+
+@app.get("/api/analytics")
+async def get_analytics(project_id: int):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Metric.sharpe, Metric.fitness, Metric.turnover, Metric.returns, Metric.margin, Expression.generator_type)
+            .select_from(Metric)
+            .join(Simulation, Metric.simulation_id == Simulation.id)
+            .join(Expression, Simulation.expression_id == Expression.id)
+            .where(Expression.project_id == project_id)
+        )
+        rows = result.all()
+        return [
+            {
+                "sharpe": r[0],
+                "fitness": r[1],
+                "turnover": r[2] * 100,  # format percentage
+                "returns": r[3] * 100,
+                "margin": r[4],
+                "generator": r[5]
+            }
+            for r in rows
+        ]
+
+@app.get("/api/passed")
+async def get_passed_alphas(project_id: int):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Expression.expression_text, Simulation.brain_alpha_id, Metric.sharpe, Metric.fitness, Metric.turnover, Metric.margin, Expression.generator_type, Expression.id)
+            .select_from(Expression)
+            .join(Simulation, Expression.id == Simulation.expression_id)
+            .join(Metric, Simulation.id == Metric.simulation_id)
+            .where(Expression.project_id == project_id, Expression.status == "PASSED")
+            .order_by(desc(Metric.sharpe))
+        )
+        return [
+            {
+                "alpha_id": p[1] if p[1] else "Pending Registry",
+                "expression": p[0],
+                "sharpe": round(p[2], 3),
+                "fitness": round(p[3], 3),
+                "turnover": round(p[4] * 100, 2),
+                "margin": round(p[5], 3),
+                "generator": p[6],
+                "db_id": p[7]
+            }
+            for p in result.all()
+        ]
+
+@app.post("/api/passed/submit-registry")
+async def submit_passed_to_registry(request: Request, req: RegistrySubmitRequest):
+    user_id = await get_current_user_id(request)
+    session = active_sessions.get(user_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired.")
+        
+    client = session["client"]
+    success, msg = await client.submit_alpha_for_review(req.alpha_id)
+    if success:
+        return {"success": True, "message": msg}
+    return JSONResponse(status_code=400, content={"success": False, "message": msg})
+
+# Mount the static files directory
+app.mount("/static", StaticFiles(directory="brain_farm/app/static"), name="static")

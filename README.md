@@ -34,11 +34,11 @@ OPENAI_API_KEY=your_openai_key
 GEMINI_API_KEY=your_gemini_key
 ```
 
-3. **Start the Streamlit Application**:
+3. **Start the FastAPI Application Server**:
 ```bash
-streamlit run brain_farm/app/ui/main.py
+uvicorn brain_farm.app.server:app --reload --port 8501
 ```
-This opens `http://localhost:8501` in your browser.
+This opens the clean green charcoal interface at `http://localhost:8501`.
 
 ---
 
