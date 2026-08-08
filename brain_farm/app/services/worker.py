@@ -22,10 +22,25 @@ class SimulationWorker:
         self._task: Optional[asyncio.Task] = None
         self._active_clients: Dict[int, BrainClient] = {}  # Cache clients by User ID to avoid re-auth
 
+    def inject_client(self, user_id: int, client: "BrainClient") -> None:
+        """
+        Register an already-authenticated BrainClient from the UI session.
+        This avoids the worker re-authenticating from scratch (which would hang
+        on the live BRAIN streaming GET).
+        Called immediately after a successful login in main.py.
+        """
+        self._active_clients[user_id] = client
+        logger.info(f"Injected authenticated client for user_id={user_id} (live={not client.use_mock})")
+
     async def get_client_for_user(self, user_id: int) -> Optional[BrainClient]:
         """Gets or creates an authenticated BrainClient for a given user ID."""
         if user_id in self._active_clients:
-            return self._active_clients[user_id]
+            client = self._active_clients[user_id]
+            # Verify the cached client is still authenticated
+            if client.is_authenticated:
+                return client
+            # Session expired — remove and fall through to re-auth below
+            del self._active_clients[user_id]
 
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(User).where(User.id == user_id))
@@ -33,21 +48,23 @@ class SimulationWorker:
             if not user:
                 return None
 
-            # Decrypt password
             password = user.get_password()
-            # If Password is empty or mock-like, default client to mock mode
             client = BrainClient(email=user.email, password=password)
-            success, msg = await client.authenticate()
-            if success:
+            # Use step1 for live auth (streaming-safe) — falls back to mock on failure
+            success, msg = await client.authenticate_step1()
+            if success and msg != "OTP_SENT":
                 self._active_clients[user_id] = client
+                logger.info(f"Worker re-authenticated for user {user.email}")
                 return client
             else:
                 logger.error(f"Worker auth failed for user {user.email}: {msg}")
-                # Create a client forced in mock mode as safety fallback
+                # Fall back to mock mode so simulations don't silently block
                 mock_client = BrainClient(email=user.email, password=password, use_mock=True)
                 await mock_client.authenticate()
                 self._active_clients[user_id] = mock_client
                 return mock_client
+
+
 
     async def start(self):
         """Starts the background processing loops."""

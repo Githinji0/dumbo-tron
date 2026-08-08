@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     BRAIN_API_URL: str = "https://api.worldquantbrain.com"
     
     # Mock settings
-    MOCK_MODE: bool = True  # Default to True so users can test offline immediately
+    MOCK_MODE: bool = False  # Overridden by UI checkbox; False = use real BRAIN API
     
     # LLM Settings (for LLM formula optimization and assistant)
     OPENAI_API_KEY: str = ""

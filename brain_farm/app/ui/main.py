@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime
 from sqlalchemy import select, desc
-from brain_farm.app.database.session import AsyncSessionLocal
+from brain_farm.app.database.session import make_session_factory
 from brain_farm.app.database.models import User, Project, Expression, Simulation, Metric, ProjectLog, DataFieldCache
 from brain_farm.app.services.field_manager import FieldManager, DEFAULT_FIELDS
 from brain_farm.app.generators.template import TemplateGenerator
@@ -19,19 +19,20 @@ from brain_farm.app.generators.llm_gen import LLMGenerator
 # App Page Layout
 st.set_page_config(
     page_title="WorldQuant BRAIN Alpha Farm Platform",
-    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# A fresh session factory created per Streamlit render to avoid cross-loop binding.
+AsyncSessionLocal = make_session_factory()
+
 # Bridge helper to execute async functions inside sync Streamlit code
 def run_async(coro):
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
         loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 # Initialize background worker daemon thread
 if "worker_thread" not in st.session_state:
@@ -69,6 +70,12 @@ if "current_project_id" not in st.session_state:
     st.session_state.current_project_id = None
 if "current_username" not in st.session_state:
     st.session_state.current_username = ""
+if "is_mock_mode" not in st.session_state:
+    st.session_state.is_mock_mode = True
+if "session_start_time" not in st.session_state:
+    st.session_state.session_start_time = None
+if "auth_logs" not in st.session_state:
+    st.session_state.auth_logs = []
 
 # CSS Styling for Premium Aesthetics
 st.markdown("""
@@ -91,25 +98,90 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ WorldQuant BRAIN Alpha Farm Platform")
-
-# Sidebar - Project Selector & Status
+st.title("WorldQuant BRAIN Alpha Farm Platform")
+# Sidebar - Navigation, Context & Project
 with st.sidebar:
-    st.header("🏢 Session Context")
-    
+    # 1. Profile header
     if st.session_state.current_user_id:
-        st.success(f"Connected as: {st.session_state.current_username}")
-        if st.button("Disconnect Credentials"):
-            st.session_state.current_user_id = None
-            st.session_state.current_project_id = None
-            st.session_state.current_username = ""
-            st.rerun()
+        username = st.session_state.current_username
+        display_name = username.split("@")[0].capitalize() if "@" in username else "Developer"
+        initials = username[0].upper() if username else "D"
+        is_mock = st.session_state.is_mock_mode
+        mode_label = "SIMULATED" if is_mock else "LIVE"
+        mode_color = "#f59e0b" if is_mock else "#22c55e"
+
+        # Session age string
+        session_info = ""
+        if st.session_state.session_start_time:
+            age_min = int((datetime.utcnow() - st.session_state.session_start_time).total_seconds() / 60)
+            session_info = f'<div style="font-size: 11px; color: #64748b; margin-top:2px;">Session: {age_min}m ago</div>'
+
+        # Session expiry warning (>23h)
+        expiry_warning = ""
+        if st.session_state.session_start_time:
+            age_h = (datetime.utcnow() - st.session_state.session_start_time).total_seconds() / 3600
+            if age_h > 23:
+                expiry_warning = '<div style="font-size: 11px; color: #ef4444; font-weight:bold;">Session Expired - Please re-login</div>'
     else:
-        st.warning("Not Connected. Please login in Tab 1.")
-        
+        display_name = "Guest"
+        username = "Not signed in"
+        initials = "?"
+        mode_label = "OFFLINE"
+        mode_color = "#94a3b8"
+        session_info = ""
+        expiry_warning = ""
+
+    st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0 4px 0;">
+            <div style="
+                width: 50px; height: 50px; border-radius: 50%;
+                background-color: #1e3a5f;
+                color: white; display: flex; align-items: center;
+                justify-content: center; font-size: 20px; font-weight: bold;
+                border: 2px solid #2563eb; flex-shrink: 0;
+            ">{initials}</div>
+            <div style="overflow: hidden;">
+                <div style="font-weight: 600; font-size: 15px; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{display_name}</div>
+                <div style="font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{username}</div>
+                <span style="
+                    font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+                    color: {mode_color}; border: 1px solid {mode_color};
+                    border-radius: 4px; padding: 1px 6px; display: inline-block; margin-top: 3px;
+                ">{mode_label}</span>
+                {session_info}
+                {expiry_warning}
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+    
     st.divider()
     
-    # Project pick selector
+    # 2. Navigation List
+    st.subheader("Platform Views")
+    if "active_view" not in st.session_state:
+        st.session_state.active_view = "Auth and Setup"
+        
+    view_options = [
+        "Auth and Setup",
+        "Projects Config",
+        "Alpha Farming Run",
+        "Live Queue",
+        "Analytics",
+        "Passed Results"
+    ]
+    
+    for opt in view_options:
+        is_active = (opt == st.session_state.active_view)
+        btn_type = "primary" if is_active else "secondary"
+        if st.button(opt, key=f"sidebar_nav_{opt}", type=btn_type, use_container_width=True):
+            st.session_state.active_view = opt
+            st.rerun()
+            
+    nav_selection = st.session_state.active_view
+    
+    st.divider()
+    
+    # 3. Project Selector
     if st.session_state.current_user_id:
         async def fetch_projects():
             async with AsyncSessionLocal() as db:
@@ -137,88 +209,199 @@ with st.sidebar:
                     return res.scalar_one_or_none()
             active_proj = run_async(get_project(proj_id))
             if active_proj:
-                st.info(f"📍 Settings:\n- Universe: {active_proj.universe}\n- Region: {active_proj.region}\n- Threshold: Sharpe ≥ {active_proj.min_sharpe}\n- Sub-Universe Sharpe ≥ {active_proj.min_sub_universe_sharpe}")
+                st.info(f"Settings:\n- Universe: {active_proj.universe}\n- Region: {active_proj.region}\n- Threshold: Sharpe >= {active_proj.min_sharpe}\n- Sub-Universe Sharpe >= {active_proj.min_sub_universe_sharpe}")
         else:
             st.warning("No projects. Please create one.")
             st.session_state.current_project_id = None
-
-# Tabs setup
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "🔑 Auth & Setup", 
-    "📂 Projects Config", 
-    "🚀 Alpha Farming Run", 
-    "⏳ Live Queue",
-    "📊 Analytics",
-    "🏆 Passed Results"
-])
-
-# ----------------- TAB 1: AUTHENTICATION -----------------
-with tab1:
-    st.header("🔒 WorldQuant BRAIN Authorization Setup")
-    
-    col_auth_left, col_auth_right = st.columns([1, 1])
-    
-    with col_auth_left:
-        st.subheader("Login Credentials")
-        email_in = st.text_input("BRAIN Account Email", value="developer@mock.com")
-        pass_in = st.text_input("Password", type="password", value="developer_password")
-        
-        mode_in = st.checkbox("Simulated/Offline Mode", value=True, help="Operates without hit WQ BRAIN API servers, utilizing locally simulated simulation polling.")
-        
-        if st.button("Authenticate API Connection", type="primary"):
-            from brain_farm.app.services.brain_client import BrainClient
-            client = BrainClient(email_in, pass_in, use_mock=mode_in)
             
-            # Verify credentials
-            ok, msg = run_async(client.authenticate())
-            if ok:
-                st.success(msg)
-                
-                # Write/Update user in db
-                async def sync_user_db():
-                    async with AsyncSessionLocal() as db:
-                        res = await db.execute(select(User).where(User.email == email_in))
-                        user = res.scalar_one_or_none()
-                        if not user:
-                            user = User(email=email_in)
-                            user.set_password(pass_in)
-                            db.add(user)
-                        else:
-                            user.set_password(pass_in)
-                        await db.commit()
-                        return user.id
-                        
-                user_id = run_async(sync_user_db())
-                st.session_state.current_user_id = user_id
-                st.session_state.current_username = email_in
-                
-                # Cache fields list if empty
-                async def cache_fields():
-                    async with AsyncSessionLocal() as db:
-                        res = await FieldManager.get_all_fields(db)
-                        if len(res) <= len(DEFAULT_FIELDS) or mode_in:
-                            # Trigger offline/api field sync
-                            await FieldManager.sync_cache_with_api(db, client, "USA", "TOP3000")
-                run_async(cache_fields())
-                
-                st.rerun()
-            else:
-                st.error(msg)
-                
+        st.write("") # spacer
+        st.write("")
+        if st.button("Log Out", key="logout_btn", use_container_width=True):
+            st.session_state.current_user_id = None
+            st.session_state.current_project_id = None
+            st.session_state.current_username = ""
+            st.rerun()
+
+# PAGE CONTROLLERS SELECTOR SWITCH
+if nav_selection == "Auth and Setup":
+    st.header("Authorization Setup")
+
+    # OTP state trackers (initialised once per session)
+    if "otp_pending"  not in st.session_state: st.session_state.otp_pending  = False
+    if "otp_client"   not in st.session_state: st.session_state.otp_client   = None
+    if "otp_email"    not in st.session_state: st.session_state.otp_email    = ""
+    if "otp_password" not in st.session_state: st.session_state.otp_password = ""
+    if "otp_mode"     not in st.session_state: st.session_state.otp_mode     = True
+
+    # Helper: finalize login after successful auth (step1 direct or step2 OTP)
+    def _finalize_login(email, password, mode, success_msg, client, ts):
+        async def sync_user_db():
+            async with AsyncSessionLocal() as db:
+                res = await db.execute(select(User).where(User.email == email))
+                user = res.scalar_one_or_none()
+                if mode and user:
+                    if user.get_password() != password:
+                        return None, "Password does not match registered mock credentials."
+                if not user:
+                    user = User(email=email)
+                    user.set_password(password)
+                    db.add(user)
+                else:
+                    user.set_password(password)
+                await db.commit()
+                return user.id, None
+
+        user_res = run_async(sync_user_db())
+        if user_res is None or user_res[0] is None:
+            err = user_res[1] if user_res else "Authentication failed."
+            st.session_state.auth_logs.insert(0, {"time": ts, "level": "error", "msg": err})
+            st.error(err)
+        else:
+            st.session_state.current_user_id   = user_res[0]
+            st.session_state.current_username  = email
+            st.session_state.is_mock_mode      = mode
+            st.session_state.session_start_time = datetime.utcnow()
+            mode_str = "SIMULATED" if mode else "LIVE"
+            st.session_state.auth_logs.insert(0, {"time": ts, "level": "success",
+                                                   "msg": f"[{mode_str}] {success_msg}"})
+            # ── Share the live session with the background worker ──────────────
+            worker = st.session_state.get("simulation_worker")
+            if worker and client:
+                worker.inject_client(user_res[0], client)
+            # ──────────────────────────────────────────────────────────────────
+            async def _cache():
+                async with AsyncSessionLocal() as db:
+                    fields = await FieldManager.get_all_fields(db)
+                    if len(fields) <= len(DEFAULT_FIELDS) or mode:
+                        await FieldManager.sync_cache_with_api(db, client, "USA", "TOP3000")
+            run_async(_cache())
+            st.rerun()
+
+
+    col_auth_left, col_auth_right = st.columns([1, 1])
+
+    with col_auth_left:
+        if not st.session_state.otp_pending:
+            # ---- STEP 1: Credentials ----
+            st.subheader("Credentials")
+            email_in = st.text_input("BRAIN Account Email",
+                                     value=st.session_state.current_username or "")
+            pass_in  = st.text_input("Password", type="password")
+            mode_in  = st.checkbox("Simulated / Offline Mode", value=True,
+                                   help="Uncheck to connect to the real WorldQuant BRAIN API.")
+
+            col_b1, col_b2 = st.columns([1, 1])
+            with col_b1:
+                do_auth  = st.button("Sign In", type="primary", use_container_width=True)
+            with col_b2:
+                do_check = st.button("Check Session", use_container_width=True,
+                                     disabled=not st.session_state.current_user_id)
+
+            if do_auth:
+                from brain_farm.app.services.brain_client import BrainClient
+                client = BrainClient(email_in, pass_in, use_mock=mode_in)
+                ok, msg = run_async(client.authenticate_step1())
+                ts = datetime.now().strftime("%H:%M:%S")
+
+                if ok and msg == "OTP_SENT":
+                    st.session_state.otp_pending  = True
+                    st.session_state.otp_client   = client
+                    st.session_state.otp_email    = email_in
+                    st.session_state.otp_password = pass_in
+                    st.session_state.otp_mode     = mode_in
+                    st.session_state.auth_logs.insert(0, {"time": ts, "level": "success",
+                                                          "msg": "[LIVE] OTP sent to your email."})
+                    st.rerun()
+
+                elif ok:
+                    _finalize_login(email_in, pass_in, mode_in, msg, client, ts)
+
+                else:
+                    st.session_state.auth_logs.insert(0, {"time": ts, "level": "error", "msg": msg})
+                    st.error(msg)
+
+            if do_check and st.session_state.current_user_id:
+                from brain_farm.app.services.brain_client import BrainClient
+                _chk = BrainClient(st.session_state.current_username, "",
+                                   use_mock=st.session_state.is_mock_mode)
+                _chk.is_authenticated = True
+                _chk._auth_time = st.session_state.session_start_time
+                alive, chk_msg = run_async(_chk.check_session())
+                ts  = datetime.now().strftime("%H:%M:%S")
+                lvl = "success" if alive else "error"
+                st.session_state.auth_logs.insert(0, {"time": ts, "level": lvl, "msg": chk_msg})
+                if alive:
+                    st.success(chk_msg)
+                else:
+                    st.error(chk_msg)
+
+        else:
+            # ---- STEP 2: OTP Verification ----
+            st.subheader("Email Verification")
+            st.info(f"A one-time code was sent to **{st.session_state.otp_email}**. Check your inbox.")
+            otp_code = st.text_input("OTP Code", max_chars=10, placeholder="e.g. 123456")
+
+            col_o1, col_o2 = st.columns([1, 1])
+            with col_o1:
+                do_verify = st.button("Verify OTP", type="primary", use_container_width=True)
+            with col_o2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.otp_pending = False
+                    st.session_state.otp_client  = None
+                    st.rerun()
+
+            if do_verify:
+                client = st.session_state.otp_client
+                ts = datetime.now().strftime("%H:%M:%S")
+                if not client or not otp_code.strip():
+                    st.error("Please enter the OTP code.")
+                else:
+                    ok, msg = run_async(client.authenticate_step2(otp_code))
+                    if ok:
+                        st.session_state.otp_pending = False
+                        _finalize_login(st.session_state.otp_email,
+                                        st.session_state.otp_password,
+                                        st.session_state.otp_mode,
+                                        msg, client, ts)
+                    else:
+                        st.session_state.auth_logs.insert(0, {"time": ts, "level": "error", "msg": msg})
+                        st.error(msg)
+
     with col_auth_right:
-        st.subheader("Platform Architecture")
+        st.subheader("Activity Log")
+        if not st.session_state.auth_logs:
+            st.caption("No activity yet. Sign in to begin.")
+        else:
+            for entry in st.session_state.auth_logs[:20]:
+                lvl   = entry["level"]
+                icon  = "✔" if lvl == "success" else "✖"
+                color = "#22c55e" if lvl == "success" else "#ef4444"
+                st.markdown(
+                    f'<div style="border-left:3px solid {color}; padding:4px 10px; margin-bottom:6px; font-size:13px;">'
+                    f'<span style="color:#64748b;">[{entry["time"]}]</span> '
+                    f'<span style="color:{color}; font-weight:600;">{icon}</span> '
+                    f'{entry["msg"]}</div>',
+                    unsafe_allow_html=True
+                )
+
+        st.divider()
+        st.subheader("Architecture")
         st.markdown("""
-        * **Secure Enclave**: Passwords and secrets are cipher-stored in DB using cryptography Fernet keys.
-        * **Async Pipelines**: All backtests are queued, processed, and polled asynchronously.
-        * **Mock Simulator**: Fallback sandbox executes AST mutation combinations, rate limit responses, and auto-optimization cycles offline.
+        - **Secure Enclave**: Passwords cipher-stored using Fernet encryption.
+        - **Async Pipelines**: Simulations queued and polled asynchronously.
+        - **Session Guard**: Sessions validated against BRAIN API; expiry at 23h.
+        - **Mock Sandbox**: Offline mode — no BRAIN server contact.
         """)
 
-# ----------------- TAB 2: PROJECTS CONFIG -----------------
-with tab2:
-    st.header("📂 Project Configurations Manager")
+
+
+
+# ----------------- VIEW 2: PROJECTS CONFIG -----------------
+elif nav_selection == "Projects Config":
+    st.header("Project Configurations Manager")
     
     if not st.session_state.current_user_id:
-        st.warning("Please log in in Tab 1 to create or manage projects.")
+        st.warning("Please log in in Auth and Setup to create or manage projects.")
     else:
         col_p1, col_p2 = st.columns([1, 1])
         
@@ -277,7 +460,7 @@ with tab2:
                     "Name": f.name,
                     "Dataset": f.dataset,
                     "Category": f.category,
-                    "Favorite": "⭐️" if f.is_favorite else "☆"
+                    "Favorite": "Favorite" if f.is_favorite else "Standard"
                 }
                 for f in fields
             ]
@@ -294,9 +477,9 @@ with tab2:
                 st.success(f"Toggled fav status for {f_name}. Current: {is_fav}")
                 st.rerun()
 
-# ----------------- TAB 3: ALPHA FARMING RUN -----------------
-with tab3:
-    st.header("🚀 Generator Farm Controller")
+# ----------------- VIEW 3: ALPHA FARMING RUN -----------------
+elif nav_selection == "Alpha Farming Run":
+    st.header("Generator Farm Controller")
     
     if not st.session_state.current_project_id:
         st.warning("Please define and select an Active Project in the sidebar.")
@@ -417,9 +600,9 @@ with tab3:
                 else:
                     st.error(msg_val)
 
-# ----------------- TAB 4: LIVE QUEUE -----------------
-with tab4:
-    st.header("⏳ Background Simulations Status Monitor")
+# ----------------- VIEW 4: LIVE QUEUE -----------------
+elif nav_selection == "Live Queue":
+    st.header("Background Simulations Status Monitor")
     
     if not st.session_state.current_project_id:
         st.warning("Please choose a Project first.")
@@ -495,19 +678,19 @@ with tab4:
                     msg = log_row[2]
                     
                     if level == "SUCCESS":
-                        st.write(f"🟢 [{ts}] **{msg}**")
+                        st.write(f"[SUCCESS] [{ts}] **{msg}**")
                     elif level == "WARNING":
-                        st.write(f"🟡 [{ts}] {msg}")
+                        st.write(f"[WARNING] [{ts}] {msg}")
                     elif level == "ERROR":
-                        st.write(f"🔴 [{ts}] **{msg}**")
+                        st.write(f"[ERROR] [{ts}] **{msg}**")
                     else:
-                        st.write(f"⚪ [{ts}] {msg}")
+                        st.write(f"[INFO] [{ts}] {msg}")
                         
         show_live_queue()
 
-# ----------------- TAB 5: ANALYTICS -----------------
-with tab5:
-    st.header("📊 Batch Analytics Performance Overview")
+# ----------------- VIEW 5: ANALYTICS -----------------
+elif nav_selection == "Analytics":
+    st.header("Batch Analytics Performance Overview")
     
     st.write(f"DEBUG: Active Project ID = {st.session_state.current_project_id}")
     if not st.session_state.current_project_id:
@@ -588,7 +771,7 @@ with tab5:
                 st.dataframe(df_grp, use_container_width=True)
                 
             st.divider()
-            st.subheader("🔗 Passed Alphas Mutual Correlation Matrix")
+            st.subheader("Passed Alphas Mutual Correlation Matrix")
             async def get_passed_for_corr():
                 async with AsyncSessionLocal() as db:
                     result = await db.execute(
@@ -614,9 +797,9 @@ with tab5:
                 df_corr = pd.DataFrame(corr_matrix, index=[e[:25]+"..." for e in passed_exprs])
                 st.dataframe(df_corr, use_container_width=True)
 
-# ----------------- TAB 6: PASSED RESULTS -----------------
-with tab6:
-    st.header("🏆 Qualified Alpha Discoveries")
+# ----------------- VIEW 6: PASSED RESULTS -----------------
+elif nav_selection == "Passed Results":
+    st.header("Qualified Alpha Discoveries")
     
     st.write(f"DEBUG: Active Project ID = {st.session_state.current_project_id}")
     if not st.session_state.current_project_id:
@@ -665,13 +848,13 @@ with tab6:
             
             col_ex1, col_ex2, col_ex3 = st.columns(3)
             col_ex1.download_button(
-                label="📥 Export passing Alphas as CSV",
+                label="Export passing Alphas as CSV",
                 data=csv,
                 file_name=f"passed_alphas_{st.session_state.current_project_id}_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
             col_ex2.download_button(
-                label="📥 Export passing Alphas as JSON",
+                label="Export passing Alphas as JSON",
                 data=json_str,
                 file_name=f"passed_alphas_{st.session_state.current_project_id}_{datetime.now().strftime('%Y%m%d')}.json",
                 mime="application/json"
