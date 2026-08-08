@@ -77,3 +77,59 @@ def test_favorite_field_toggle():
     data = response.json()
     assert data["success"] is True
     assert "is_favorite" in data
+
+def test_brain_health():
+    # Health endpoint without active session
+    client.cookies.clear()
+    response = client.get("/api/brain/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert "reachable" in data
+    assert "session_active" in data
+    assert data["session_active"] is False
+
+def test_brain_auth_test_mock_success():
+    payload = {
+        "email": "testuser@mock.com",
+        "password": "mockpassword",
+        "use_mock": True
+    }
+    response = client.post("/api/brain/auth/test", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["otp_pending"] is False
+    assert data["error_code"] is None
+
+def test_brain_auth_test_mock_failure():
+    payload = {
+        "email": "fail_user@mock.com",
+        "password": "wrongpassword",
+        "use_mock": True
+    }
+    response = client.post("/api/brain/auth/test", json=payload)
+    assert response.status_code == 401
+    data = response.json()
+    assert data["success"] is False
+    assert data["error_code"] == "BRAIN_AUTH_INVALID_CREDENTIALS"
+
+def test_brain_submit_all_registry_no_session():
+    response = client.post("/api/passed/submit-all-registry", json={"project_id": 1})
+    assert response.status_code == 401  # Session lost/unauthorized
+
+def test_brain_submit_all_registry_mock():
+    # Login first
+    payload = {
+        "email": "testuser@mock.com",
+        "password": "mockpassword",
+        "use_mock": True
+    }
+    resp_login = client.post("/api/auth/login", json=payload)
+    cookies = resp_login.cookies
+    
+    # Trigger bulk submission on project 1
+    response = client.post("/api/passed/submit-all-registry", json={"project_id": 1}, cookies=cookies)
+    assert response.status_code == 200
+    data = response.json()
+    assert "success" in data
+    assert "submitted_count" in data

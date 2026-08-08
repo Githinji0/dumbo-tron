@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
     is_mock: true,
     user_id: null
   };
-  
+
   let activeProjectId = null;
   let pollIntervalId = null;
   let logPollIntervalId = null;
@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initNav();
   checkAuthStatus();
   initEventHandlers();
-  
+
   // Lucide icons render
   lucide.createIcons();
 
@@ -70,7 +70,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (viewId === "analytics") {
       loadAnalyticsData();
     }
-    
+
     if (viewId === "passed-results") {
       loadPassedResults();
     }
@@ -92,7 +92,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await fetch("/api/auth/status", { headers: getHeaders() });
       const data = await response.json();
-      
+
       currentUser.authenticated = data.authenticated;
       currentUser.username = data.username;
       currentUser.is_mock = data.is_mock;
@@ -115,11 +115,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const modeBadge = document.getElementById("modeBadge");
     const sessionInfo = document.getElementById("sessionInfoDetails");
     const logoutBtn = document.getElementById("logoutButton");
-    
+
     // Auth Warnings
     const projWarning = document.getElementById("projectsAuthWarning");
     const projForm = document.getElementById("projectsFormWrapper");
-    
+
     if (currentUser.authenticated) {
       // User Profile Sidebar
       const initials = currentUser.username.split("@")[0].slice(0, 2).toUpperCase();
@@ -130,11 +130,11 @@ document.addEventListener("DOMContentLoaded", () => {
       modeBadge.style.color = currentUser.is_mock ? "var(--warning)" : "var(--primary-accent)";
       sessionInfo.innerText = "Connected";
       logoutBtn.style.display = "flex";
-      
+
       // Projects Config Warnings Hidden
       if (projWarning) projWarning.style.display = "none";
       if (projForm) projForm.style.display = "grid";
-      
+
       document.getElementById("authCredentialsFormPanel").style.display = "none";
       document.getElementById("authOtpFormPanel").style.display = "none";
     } else {
@@ -145,14 +145,14 @@ document.addEventListener("DOMContentLoaded", () => {
       modeBadge.style.color = "var(--text-secondary)";
       sessionInfo.innerText = "";
       logoutBtn.style.display = "none";
-      
+
       if (projWarning) projWarning.style.display = "flex";
       if (projForm) projForm.style.display = "none";
-      
+
       document.getElementById("authCredentialsFormPanel").style.display = "block";
       document.getElementById("authOtpFormPanel").style.display = "none";
     }
-    
+
     updateFarmingViewWarnings();
     updateQueueViewWarnings();
     updateAnalyticsViewWarnings();
@@ -163,7 +163,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const feed = document.getElementById("authActivityLogsFeed");
     const placeholder = feed.querySelector(".placeholder-text");
     if (placeholder) placeholder.remove();
-    
+
     const timeStr = new Date().toTimeString().split(" ")[0];
     const logLine = document.createElement("div");
     logLine.className = `log-line ${level}`;
@@ -175,7 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function initEventHandlers() {
     // Login Submission
     document.getElementById("btnSignInSubmit").addEventListener("click", handleSignIn);
-    
+
     // OTP verify Submission
     document.getElementById("btnVerifyOtpSubmit").addEventListener("click", handleVerifyOtp);
     document.getElementById("btnCancelOtp").addEventListener("click", () => {
@@ -223,7 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Manual Alpha Submit
     document.getElementById("btnSubmitManualExpression").addEventListener("click", handleManualSubmit);
-    
+
     // Refresh Logs manually inside Queue page
     document.getElementById("btnRefreshLogsQueue").addEventListener("click", () => {
       loadQueueLogs();
@@ -235,6 +235,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Submit Alpha to Registry
     document.getElementById("btnSubmitToRegistry").addEventListener("click", handleRegistrySubmission);
+    document.getElementById("btnSubmitAllToRegistry").addEventListener("click", handleRegistrySubmissionAll);
   }
 
   async function handleSignIn() {
@@ -255,7 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ email, password, use_mock: useMock })
       });
       const data = await res.json();
-      
+
       if (!res.ok) {
         logAuthActivity("Auth-Error", data.detail || data.message || "Failed authentication step 1", "ERROR");
         return;
@@ -270,7 +271,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentUser.username = data.username;
         currentUser.is_mock = data.is_mock;
         currentUser.user_id = data.user_id;
-        
+
         updateAuthUI();
         logAuthActivity("Auth", data.message, "SUCCESS");
         await loadProjectsList();
@@ -366,7 +367,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (res.ok) {
         alert("Created project definition context!");
         await loadProjectsList();
-        
+
         // Select the newly created project
         if (data.project_id) {
           activeProjectId = data.project_id;
@@ -387,10 +388,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch("/api/projects", { headers: getHeaders() });
       const projects = await res.json();
-      
+
       const select = document.getElementById("activeProjectSelect");
       select.innerHTML = "";
-      
+
       if (projects.length === 0) {
         const option = document.createElement("option");
         option.value = "";
@@ -404,7 +405,7 @@ document.addEventListener("DOMContentLoaded", () => {
           option.text = `${p.name} (${p.region} - ${p.universe})`;
           select.appendChild(option);
         });
-        
+
         // Auto-select first project if none is active
         if (!activeProjectId || !projects.find(p => p.id === activeProjectId)) {
           activeProjectId = projects[0].id;
@@ -422,17 +423,17 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateProjectSummaries() {
     const list = window.cachedProjects || [];
     const summaryBox = document.getElementById("projectSummaryInfo");
-    
+
     updateFarmingViewWarnings();
     updateQueueViewWarnings();
     updateAnalyticsViewWarnings();
     updatePassedViewWarnings();
-    
+
     if (!activeProjectId) {
       summaryBox.innerHTML = '<p class="placeholder-text">Please choose or create a project context.</p>';
       return;
     }
-    
+
     const project = list.find(p => p.id === activeProjectId);
     if (!project) return;
 
@@ -515,7 +516,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderFieldsTable(fields) {
     const tableBody = document.querySelector("#fieldsCatalogTable tbody");
     tableBody.innerHTML = "";
-    
+
     if (fields.length === 0) {
       tableBody.innerHTML = '<tr><td colspan="4" class="text-center">No fields available in catalog. Click Sync.</td></tr>';
       return;
@@ -523,35 +524,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
     fields.forEach(f => {
       const tr = document.createElement("tr");
-      
+
       const starTd = document.createElement("td");
       starTd.className = "text-center";
       starTd.innerHTML = `<i data-lucide="star" class="fav-star ${f.is_favorite ? 'active' : ''}"></i>`;
       starTd.querySelector("i").addEventListener("click", () => handleFieldFavoriteToggle(f.id));
-      
+
       const codeTd = document.createElement("td");
       codeTd.innerHTML = `<code>${f.id}</code>`;
-      
+
       const nameTd = document.createElement("td");
       nameTd.innerText = f.name;
-      
+
       const catTd = document.createElement("td");
       catTd.innerHTML = `<span class="badge" style="background:var(--bg-hover); border:1px solid var(--border-color); color:var(--text-secondary)">${f.category}</span>`;
-      
+
       tr.appendChild(starTd);
       tr.appendChild(codeTd);
       tr.appendChild(nameTd);
       tr.appendChild(catTd);
       tableBody.appendChild(tr);
     });
-    
+
     lucide.createIcons();
   }
 
   function filterFieldsTable() {
     const query = document.getElementById("fieldsCatalogSearch").value.toLowerCase();
     const favOnly = document.getElementById("fieldsFavoritesOnly").checked;
-    
+
     const list = window.cachedFields || [];
     const filtered = list.filter(f => {
       const matchesQuery = f.id.toLowerCase().includes(query) || f.name.toLowerCase().includes(query) || f.category.toLowerCase().includes(query);
@@ -656,7 +657,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function handleManualSubmit() {
     const expr = document.getElementById("manualExpressionInput").value;
     const feedback = document.getElementById("manualSubmissionResultFeedback");
-    
+
     if (!expr) {
       alert("Specify formula to validate.");
       return;
@@ -675,7 +676,7 @@ document.addEventListener("DOMContentLoaded", () => {
         })
       });
       const data = await res.json();
-      
+
       if (res.ok) {
         feedback.innerHTML = `<div class="alert alert-info" style="border-color:var(--primary-accent); color:var(--primary-accent); background:var(--accent-faded)">✔ Successful Submission: ${data.message}</div>`;
       } else {
@@ -691,7 +692,7 @@ document.addEventListener("DOMContentLoaded", () => {
     stopQueuePolling();
     loadQueueData();
     loadQueueLogs();
-    
+
     pollIntervalId = setInterval(loadQueueData, 2000);
     logPollIntervalId = setInterval(loadQueueLogs, 4000);
   }
@@ -712,13 +713,13 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch(`/api/queue?project_id=${activeProjectId}`);
       const data = await res.json();
-      
+
       document.getElementById("statQueuePending").innerText = data.pending_count;
       document.getElementById("statQueueRunning").innerText = data.running_count;
-      
+
       const tbody = document.querySelector("#queueSimulationsTable tbody");
       tbody.innerHTML = "";
-      
+
       const list = data.simulations || [];
       if (list.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center">No simulation tasks in queue history...</td></tr>';
@@ -727,25 +728,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
       list.forEach(s => {
         const tr = document.createElement("tr");
-        
+
         const idTd = document.createElement("td");
         idTd.innerHTML = `<code>${s.sim_id}</code>`;
-        
+
         const exprTd = document.createElement("td");
         exprTd.style.fontFamily = "monospace";
         exprTd.innerText = s.expression;
-        
+
         const statusTd = document.createElement("td");
         const statusLower = s.status.toLowerCase();
         statusTd.innerHTML = `<span class="status-pill ${statusLower}">${s.status}</span>`;
-        
+
         const checkTd = document.createElement("td");
         checkTd.innerText = s.last_checked;
-        
+
         const detailTd = document.createElement("td");
         detailTd.style.color = statusLower === "error" ? "var(--error)" : "var(--text-secondary)";
         detailTd.innerText = s.message;
-        
+
         tr.appendChild(idTd);
         tr.appendChild(exprTd);
         tr.appendChild(statusTd);
@@ -763,10 +764,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch(`/api/logs?project_id=${activeProjectId}`);
       const logs = await res.json();
-      
+
       const list = document.getElementById("miningFarmLogsList");
       list.innerHTML = "";
-      
+
       if (logs.length === 0) {
         list.innerHTML = '<p class="placeholder-text">No message logs captured yet for this project...</p>';
         return;
@@ -806,7 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderFitnessBoxesChart(data);
       renderSharpeRangesChart(data);
       renderAnalyticsAveragesTable(data);
-      
+
       // Calculate mutual correlations if we have passed alphas
       loadAnalyticsMutualCorrelations();
     } catch (err) {
@@ -871,13 +872,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const series = Object.keys(grouped).map(key => {
-      const vals = grouped[key].sort((a,b)=>a-b);
+      const vals = grouped[key].sort((a, b) => a - b);
       // Min, Q1, Median, Q3, Max box values
       const min = vals[0];
       const max = vals[vals.length - 1];
       const midIdx = Math.floor(vals.length / 2);
       const median = vals.length % 2 !== 0 ? vals[midIdx] : (vals[midIdx - 1] + vals[midIdx]) / 2;
-      
+
       const q1Idx = Math.floor(vals.length / 4);
       const q1 = vals[q1Idx];
       const q3Idx = Math.floor(vals.length * 3 / 4);
@@ -886,10 +887,10 @@ document.addEventListener("DOMContentLoaded", () => {
       return {
         x: key,
         y: [
-          parseFloat(min.toFixed(3)), 
-          parseFloat(q1.toFixed(3)), 
-          parseFloat(median.toFixed(3)), 
-          parseFloat(q3.toFixed(3)), 
+          parseFloat(min.toFixed(3)),
+          parseFloat(q1.toFixed(3)),
+          parseFloat(median.toFixed(3)),
+          parseFloat(q3.toFixed(3)),
           parseFloat(max.toFixed(3))
         ]
       };
@@ -919,7 +920,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const bins = {
       "< 0.5": 0, "0.5 - 1.0": 0, "1.0 - 1.5": 0, "1.5 - 2.0": 0, "2.0+": 0
     };
-    
+
     items.forEach(pt => {
       const sh = pt.sharpe;
       if (sh < 0.5) bins["< 0.5"]++;
@@ -994,26 +995,26 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch(`/api/passed?project_id=${activeProjectId}`);
       const passed = await res.json();
-      
+
       const matrixWrapper = document.getElementById("correlationMatrixWrapper");
       if (passed.length < 2) {
         matrixWrapper.style.display = "none";
         return;
       }
-      
+
       matrixWrapper.style.display = "block";
       const tableHead = document.querySelector("#analyticsCorrelationMatrixTable scarcity thead");
       const tableBody = document.querySelector("#analyticsCorrelationMatrixTable tbody");
-      
+
       // Clear
       document.querySelector("#analyticsCorrelationMatrixTable").innerHTML = `
         <thead><tr id="corrHeadRow"><th>Formula</th></tr></thead>
         <tbody></tbody>
       `;
-      
+
       const headRow = document.getElementById("corrHeadRow");
       const tbody = document.querySelector("#analyticsCorrelationMatrixTable tbody");
-      
+
       // Calculate a pseudo Jaccard-like or mock sub-universe similarity
       passed.forEach((p, idx) => {
         const th = document.createElement("th");
@@ -1021,19 +1022,19 @@ document.addEventListener("DOMContentLoaded", () => {
         th.style.maxWidth = "120px";
         th.style.overflow = "hidden";
         th.style.textOverflow = "ellipsis";
-        th.innerText = p.alpha_id === "Pending Registry" ? `P${idx+1}` : p.alpha_id;
+        th.innerText = p.alpha_id === "Pending Registry" ? `P${idx + 1}` : p.alpha_id;
         th.title = p.expression;
         headRow.appendChild(th);
       });
-      
+
       passed.forEach((p1, idx1) => {
         const tr = document.createElement("tr");
         const cellLabel = document.createElement("td");
         cellLabel.style.fontWeight = "600";
-        cellLabel.innerText = p1.alpha_id === "Pending Registry" ? `P${idx1+1}` : p1.alpha_id;
+        cellLabel.innerText = p1.alpha_id === "Pending Registry" ? `P${idx1 + 1}` : p1.alpha_id;
         cellLabel.title = p1.expression;
         tr.appendChild(cellLabel);
-        
+
         passed.forEach((p2, idx2) => {
           const td = document.createElement("td");
           td.style.textAlign = "center";
@@ -1050,9 +1051,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const union = new Set([...w1, ...w2]);
             corr = union.size > 0 ? (intersect.size / union.size) : 0.0;
           }
-          
+
           td.innerText = corr.toFixed(2);
-          
+
           // Color highlighting based on density
           const alphaColor = Math.abs(corr);
           if (corr === 1.0) {
@@ -1064,13 +1065,13 @@ document.addEventListener("DOMContentLoaded", () => {
           } else {
             td.style.backgroundColor = `rgba(0, 230, 118, ${alphaColor * 0.15})`;
           }
-          
+
           tr.appendChild(td);
         });
-        
+
         tbody.appendChild(tr);
       });
-      
+
     } catch (err) {
       console.error(err);
     }
@@ -1092,7 +1093,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (passed.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="text-center">No qualified passed alphas recorded in this project context yet.</td></tr>';
-        
+
         const opt = document.createElement("option");
         opt.value = "";
         opt.innerText = "No alphas available to register";
@@ -1102,29 +1103,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
       passed.forEach(p => {
         const tr = document.createElement("tr");
-        
+
         const idTd = document.createElement("td");
         idTd.innerHTML = `<code>${p.alpha_id}</code>`;
-        
+
         const exprTd = document.createElement("td");
         exprTd.style.fontFamily = "monospace";
         exprTd.innerText = p.expression;
-        
+
         const sharpeTd = document.createElement("td");
         sharpeTd.innerText = p.sharpe;
-        
+
         const fitnessTd = document.createElement("td");
         fitnessTd.innerText = p.fitness;
-        
+
         const turnTd = document.createElement("td");
         turnTd.innerText = `${p.turnover}%`;
-        
+
         const marginTd = document.createElement("td");
         marginTd.innerText = p.margin;
-        
+
         const genTd = document.createElement("td");
         genTd.innerHTML = `<span class="badge" style="background:var(--bg-hover); border:1px solid var(--border-color); color:var(--primary-accent)">${p.generator}</span>`;
-        
+
         tr.appendChild(idTd);
         tr.appendChild(exprTd);
         tr.appendChild(sharpeTd);
@@ -1163,15 +1164,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let fileContent = "";
     let mimeType = "";
-    let filename = `passed_alphas_${activeProjectId}_${new Date().toISOString().slice(0,10).replace(/-/g,"")}`;
+    let filename = `passed_alphas_${activeProjectId}_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
 
     if (format === "csv") {
       mimeType = "text/csv;charset=utf-8;";
       filename += ".csv";
-      
+
       const headers = ["Alpha ID", "Expression Formula", "Sharpe", "Fitness", "Turnover (%)", "Margin (bps)", "Generator"];
       fileContent = headers.join(",") + "\r\n";
-      
+
       list.forEach(p => {
         const row = [
           `"${p.alpha_id}"`,
@@ -1206,7 +1207,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function handleRegistrySubmission() {
     const alphaId = document.getElementById("passedRegistryAlphaSelector").value;
     const feedback = document.getElementById("registryFeedbackMessage");
-    
+
     if (!alphaId) {
       alert("Select a valid Alpha ID to register.");
       return;
@@ -1222,11 +1223,40 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ alpha_id: alphaId })
       });
       const data = await res.json();
-      
+
       if (res.ok) {
         feedback.innerText = `Registry Submission Completed: ${data.message}`;
         feedback.className = "alert alert-info";
         feedback.style.color = "var(--primary-accent)";
+      } else {
+        feedback.innerText = `Failed: ${data.message || data.detail}`;
+        feedback.className = "alert alert-error";
+      }
+    } catch (err) {
+      feedback.innerText = `Network error: ${err.message}`;
+      feedback.className = "alert alert-error";
+    }
+  }
+
+  async function handleRegistrySubmissionAll() {
+    if (!activeProjectId) {
+      alert("Select a valid farming project context first.");
+      return;
+    }
+    const feedback = document.getElementById("registryFeedbackMessage");
+    feedback.innerText = "Submitting all qualified alphas...";
+    feedback.className = "alert alert-info";
+
+    try {
+      const res = await fetch("/api/passed/submit-all-registry", {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: activeProjectId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        feedback.innerText = `Bulk Registry Completed: ${data.message}`;
+        feedback.className = "alert alert-info";
       } else {
         feedback.innerText = `Failed: ${data.message || data.detail}`;
         feedback.className = "alert alert-error";

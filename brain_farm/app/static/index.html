@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,7 +8,9 @@
   <!-- Google Fonts Poppins -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap"
+    rel="stylesheet">
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- ApexCharts CDN -->
@@ -15,9 +18,10 @@
   <!-- Main Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <div class="app-container">
-    
+
     <!-- Sidebar Selector -->
     <aside class="sidebar">
       <div class="profile-section">
@@ -29,23 +33,26 @@
           <div class="session-info" id="sessionInfoDetails"></div>
         </div>
       </div>
-      
+
       <hr class="divider">
-      
+
       <nav class="nav-menu">
         <h3>Platform Views</h3>
         <ul>
-          <li><button class="nav-btn active" data-view="auth-setup"><i data-lucide="shield-check"></i> Auth & Setup</button></li>
-          <li><button class="nav-btn" data-view="projects-config"><i data-lucide="settings"></i> Projects Config</button></li>
+          <li><button class="nav-btn active" data-view="auth-setup"><i data-lucide="shield-check"></i> Auth &
+              Setup</button></li>
+          <li><button class="nav-btn" data-view="projects-config"><i data-lucide="settings"></i> Projects
+              Config</button></li>
           <li><button class="nav-btn" data-view="farming-run"><i data-lucide="cpu"></i> Alpha Farming Run</button></li>
           <li><button class="nav-btn" data-view="live-queue"><i data-lucide="activity"></i> Live Queue</button></li>
           <li><button class="nav-btn" data-view="analytics"><i data-lucide="bar-chart-2"></i> Analytics</button></li>
-          <li><button class="nav-btn" data-view="passed-results"><i data-lucide="award"></i> Passed Results</button></li>
+          <li><button class="nav-btn" data-view="passed-results"><i data-lucide="award"></i> Passed Results</button>
+          </li>
         </ul>
       </nav>
-      
+
       <hr class="divider">
-      
+
       <div class="project-selector">
         <label for="activeProjectSelect">Active Farming Project</label>
         <select id="activeProjectSelect"></select>
@@ -53,7 +60,7 @@
           <p class="placeholder-text">Please choose or create a project context.</p>
         </div>
       </div>
-      
+
       <button class="logout-btn" id="logoutButton" style="display:none;"><i data-lucide="log-out"></i> Log Out</button>
 
       <div class="footer-note">
@@ -74,14 +81,14 @@
 
       <!-- View Wrapper -->
       <div class="view-content-wrapper">
-        
+
         <!-- View 1: Auth and Setup -->
         <section id="view-auth-setup" class="view-panel active">
           <h2>Authorization Setup</h2>
           <div class="grid-2col">
             <div class="card card-form">
               <h3>Credentials</h3>
-              
+
               <!-- Credentials Step 1Form -->
               <div id="authCredentialsFormPanel">
                 <div class="form-group">
@@ -124,9 +131,9 @@
               <div class="logs-feed" id="authActivityLogsFeed">
                 <p class="placeholder-text">No logins or pings captured in this session.</p>
               </div>
-              
+
               <hr class="divider">
-              
+
               <h3>Architecture Enclave</h3>
               <ul class="bullet-list">
                 <li><strong>Secure Encryption:</strong> Cryptography cipher storing on SQLITE.</li>
@@ -143,7 +150,7 @@
           <div class="auth-warning" id="projectsAuthWarning">
             <i data-lucide="alert-triangle"></i> Please sign in on the Auth and Setup view to manage projects.
           </div>
-          
+
           <div class="grid-2col" id="projectsFormWrapper">
             <div class="card">
               <h3>Create New Project Context</h3>
@@ -153,9 +160,10 @@
               </div>
               <div class="form-group">
                 <label for="projDescInput">Project Description</label>
-                <textarea id="projDescInput" rows="2">Farming alphas targeting US Mid & Large Cap equities using momentum lookbacks.</textarea>
+                <textarea id="projDescInput"
+                  rows="2">Farming alphas targeting US Mid & Large Cap equities using momentum lookbacks.</textarea>
               </div>
-              
+
               <div class="grid-3col">
                 <div class="form-group">
                   <label for="projRegionSelect">Region Pool</label>
@@ -189,7 +197,8 @@
               <div class="grid-2col">
                 <div class="form-group">
                   <label>Signal Delay: <span id="delayVal">1</span></label>
-                  <input type="range" id="projDelayInput" min="0" max="2" value="1" oninput="document.getElementById('delayVal').innerText=this.value">
+                  <input type="range" id="projDelayInput" min="0" max="2" value="1"
+                    oninput="document.getElementById('delayVal').innerText=this.value">
                 </div>
                 <div class="form-group">
                   <label for="projDecayInput">Decay Days</label>
@@ -228,7 +237,8 @@
             <div class="card">
               <div class="card-header-flex">
                 <h3>Data Fields Catalog</h3>
-                <button class="btn btn-secondary btn-sm" id="btnSyncFieldsCatalog"><i data-lucide="refresh-cw"></i> Sync Catalog</button>
+                <button class="btn btn-secondary btn-sm" id="btnSyncFieldsCatalog"><i data-lucide="refresh-cw"></i> Sync
+                  Catalog</button>
               </div>
               <div class="search-catalog">
                 <input type="text" id="fieldsCatalogSearch" placeholder="Filter fields by category or code...">
@@ -248,7 +258,9 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td colspan="4" class="text-center">Loading cached catalog...</td></tr>
+                    <tr>
+                      <td colspan="4" class="text-center">Loading cached catalog...</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -262,7 +274,7 @@
           <div class="auth-warning" id="farmingProjectWarning">
             <i data-lucide="alert-triangle"></i> Please choose or create a project context on the sidebar config.
           </div>
-          
+
           <div class="grid-2col" id="farmingRunFormWrapper">
             <div class="card card-form">
               <h3>Farming Parameters</h3>
@@ -276,15 +288,17 @@
                   <option value="LLM-AI Optimizer">LLM-AI Optimizer</option>
                 </select>
               </div>
-              
+
               <div class="form-group">
                 <label>Candidate Count to Queue: <span id="farmCountVal">30</span></label>
-                <input type="range" id="farmCountRange" min="1" max="200" value="30" oninput="document.getElementById('farmCountVal').innerText=this.value">
+                <input type="range" id="farmCountRange" min="1" max="200" value="30"
+                  oninput="document.getElementById('farmCountVal').innerText=this.value">
               </div>
 
               <div class="form-group" id="astDepthWrapper">
                 <label>Syntax Tree limits (max depth): <span id="astDepthVal">3</span></label>
-                <input type="range" id="astDepthRange" min="2" max="5" value="3" oninput="document.getElementById('astDepthVal').innerText=this.value">
+                <input type="range" id="astDepthRange" min="2" max="5" value="3"
+                  oninput="document.getElementById('astDepthVal').innerText=this.value">
               </div>
 
               <h3>Validator Pre-check Details</h3>
@@ -293,7 +307,7 @@
                 <li>Validates delay boundaries against historical databases.</li>
                 <li>Filters out nesting redundancies automatically.</li>
               </ul>
-              
+
               <button class="btn btn-primary btn-full" id="btnLaunchFarmingJob">Launch & Queue Farm Job</button>
             </div>
 
@@ -303,10 +317,12 @@
               <p>Type a custom FastExpr expression to execute direct validation and simulation.</p>
               <div class="form-group" style="margin-top: 15px;">
                 <label for="manualExpressionInput">FastExpr Code</label>
-                <input type="text" id="manualExpressionInput" value="group_neutralize(ts_decay_linear(rank(close), 10), subindustry)">
+                <input type="text" id="manualExpressionInput"
+                  value="group_neutralize(ts_decay_linear(rank(close), 10), subindustry)">
               </div>
-              <button class="btn btn-secondary btn-full" id="btnSubmitManualExpression">Validate and Queue Single Alpha</button>
-              
+              <button class="btn btn-secondary btn-full" id="btnSubmitManualExpression">Validate and Queue Single
+                Alpha</button>
+
               <div id="manualSubmissionResultFeedback" style="margin-top: 15px;"></div>
             </div>
           </div>
@@ -318,7 +334,7 @@
           <div class="auth-warning" id="queueProjectWarning">
             <i data-lucide="alert-triangle"></i> Please choose or create a project context.
           </div>
-          
+
           <div id="queueStatsContent" class="stats-wrapper">
             <!-- 3 Column Queue Stats -->
             <div class="grid-3col">
@@ -354,7 +370,9 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td colspan="5" class="text-center">No simulation batches currently running...</td></tr>
+                    <tr>
+                      <td colspan="5" class="text-center">No simulation batches currently running...</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -364,7 +382,8 @@
             <div class="card" style="margin-top: 25px;">
               <div class="card-header-flex">
                 <h3>Mining Farm Live Logs</h3>
-                <button class="btn btn-secondary btn-sm" id="btnRefreshLogsQueue"><i data-lucide="refresh-cw"></i> Refresh Logs</button>
+                <button class="btn btn-secondary btn-sm" id="btnRefreshLogsQueue"><i data-lucide="refresh-cw"></i>
+                  Refresh Logs</button>
               </div>
               <div class="logs-feed" id="miningFarmLogsList" style="max-height: 250px;">
                 <p class="placeholder-text">No messages recorded yet for this project context.</p>
@@ -379,7 +398,7 @@
           <div class="auth-warning" id="analyticsProjectWarning">
             <i data-lucide="alert-triangle"></i> Please choose or create a project context.
           </div>
-          
+
           <div id="analyticsContentWrapper">
             <!-- No metrics placeholder -->
             <div class="alert alert-info" id="analyticsEmptyAlert" style="display:none;">
@@ -392,19 +411,19 @@
                 <h3>Alpha Sharpe Ratio vs Turnover</h3>
                 <div id="scatterChartWrapper" style="height: 350px;"></div>
               </div>
-              
+
               <!-- Fitness Densities -->
               <div class="card">
                 <h3>Fitness Score Distributions</h3>
                 <div id="fitnessChartWrapper" style="height: 350px;"></div>
               </div>
-              
+
               <!-- Sharpe limits by engine -->
               <div class="card">
                 <h3>Alpha Sharpe Density Ranges</h3>
                 <div id="sharpeRangesChartWrapper" style="height: 350px;"></div>
               </div>
-              
+
               <!-- Generator Performance Averages -->
               <div class="card">
                 <h3>Generator Performance Statistics</h3>
@@ -444,7 +463,7 @@
           <div class="auth-warning" id="passedProjectWarning">
             <i data-lucide="alert-triangle"></i> Please choose or create a project context.
           </div>
-          
+
           <div id="passedContentWrapper">
             <!-- Table listing -->
             <div class="card">
@@ -463,7 +482,10 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td colspan="7" class="text-center">No qualified passed alphas recorded in this project context.</td></tr>
+                    <tr>
+                      <td colspan="7" class="text-center">No qualified passed alphas recorded in this project context.
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -475,21 +497,26 @@
                 <h3>Export & Report Controls</h3>
                 <p>Download the database records in standard format.</p>
                 <div class="btn-row" style="margin-top: 15px;">
-                  <button class="btn btn-secondary" id="btnExportCSV"><i data-lucide="download"></i> Export as CSV</button>
-                  <button class="btn btn-secondary" id="btnExportJSON"><i data-lucide="download"></i> Export as JSON</button>
+                  <button class="btn btn-secondary" id="btnExportCSV"><i data-lucide="download"></i> Export as
+                    CSV</button>
+                  <button class="btn btn-secondary" id="btnExportJSON"><i data-lucide="download"></i> Export as
+                    JSON</button>
                 </div>
               </div>
               <div class="card">
                 <h3>WorldQuant BRAIN Registry Submission</h3>
                 <p>Submit your qualified alpha candidate directly to the live WorldQuant BRAIN platform.</p>
-                
+
                 <div class="form-group" style="margin-top: 15px;">
                   <label for="passedRegistryAlphaSelector">Select Passed Alpha ID</label>
                   <select id="passedRegistryAlphaSelector">
                     <option value="">No alphas available to register</option>
                   </select>
                 </div>
-                <button class="btn btn-primary btn-full" id="btnSubmitToRegistry"><i data-lucide="send"></i> Submit Alpha to WorldQuant BRAIN Registry</button>
+                <button class="btn btn-primary btn-full" id="btnSubmitToRegistry"><i data-lucide="send"></i> Submit
+                  Alpha to WorldQuant BRAIN Registry</button>
+                <button class="btn btn-secondary btn-full" id="btnSubmitAllToRegistry" style="margin-top: 10px;"><i
+                    data-lucide="send"></i> Submit All Qualified Alphas</button>
                 <div id="registryFeedbackMessage" style="margin-top: 10px;"></div>
               </div>
             </div>
@@ -504,4 +531,5 @@
   <!-- Javascript Core Logic -->
   <script src="app.js"></script>
 </body>
+
 </html>

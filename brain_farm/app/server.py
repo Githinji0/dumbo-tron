@@ -116,6 +116,9 @@ class SingleSubmissionRequest(BaseModel):
 class RegistrySubmitRequest(BaseModel):
     alpha_id: str
 
+class RegistrySubmitAllRequest(BaseModel):
+    project_id: int
+
 # Endpoints
 @app.get("/")
 def read_root():
@@ -163,7 +166,29 @@ async def auth_login(req: LoginRequest):
     if success:
         return await finalize_user_login(email, password, use_mock, client, "Live Session authenticated successfully!")
     
-    return JSONResponse(status_code=400, content={"success": False, "otp_pending": False, "message": msg})
+    # Map failure safe error category
+    error_code = "BRAIN_AUTH_NETWORK_ERROR"
+    status_code = 400
+    if "401" in msg or "credentials" in msg.lower():
+        error_code = "BRAIN_AUTH_INVALID_CREDENTIALS"
+        status_code = 401
+    elif "403" in msg or "forbidden" in msg.lower() or "rejected" in msg.lower():
+        error_code = "BRAIN_AUTH_FORBIDDEN"
+        status_code = 403
+    elif "429" in msg or "rate" in msg.lower() or "attempts" in msg.lower():
+        error_code = "BRAIN_AUTH_RATE_LIMITED"
+        status_code = 429
+    elif "timeout" in msg.lower():
+        error_code = "BRAIN_AUTH_TIMEOUT"
+        status_code = 408
+    elif "network" in msg.lower() or "reach" in msg.lower():
+        error_code = "BRAIN_AUTH_NETWORK_ERROR"
+        status_code = 503
+        
+    return JSONResponse(
+        status_code=status_code,
+        content={"success": False, "otp_pending": False, "message": msg, "error_code": error_code}
+    )
 
 @app.post("/api/auth/verify-otp")
 async def auth_verify_otp(req: OTPVerifyRequest):
@@ -183,7 +208,19 @@ async def auth_verify_otp(req: OTPVerifyRequest):
         otp_auth_states.pop(email, None)
         return await finalize_user_login(email, password, use_mock, client, msg)
         
-    return JSONResponse(status_code=400, content={"success": False, "message": msg})
+    error_code = "BRAIN_AUTH_UNAUTHORIZED"
+    status_code = 400
+    if "401" in msg:
+        error_code = "BRAIN_AUTH_INVALID_CREDENTIALS"
+        status_code = 401
+    elif "403" in msg or "rejected" in msg.lower():
+        error_code = "BRAIN_AUTH_FORBIDDEN"
+        status_code = 403
+        
+    return JSONResponse(
+        status_code=status_code,
+        content={"success": False, "message": msg, "error_code": error_code}
+    )
 
 async def finalize_user_login(email: str, password: str, use_mock: bool, client: BrainClient, success_msg: str):
     async with AsyncSessionLocal() as db:
@@ -246,6 +283,150 @@ async def auth_logout(request: Request, response: Response):
     
     response.delete_cookie(key="session_user_id")
     return {"success": True}
+
+@app.get("/api/brain/health")
+async def brain_health(request: Request):
+    import time
+    import os
+    import httpx
+    brain_debug = os.environ.get("BRAIN_DEBUG", "false").lower() == "true"
+    
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+    }
+    
+    # Optional session-check: if request has active session, check session
+    user_id = None
+    try:
+        user_id = await get_current_user_id(request)
+    except Exception:
+        pass
+        
+    if user_id and user_id in active_sessions:
+        session = active_sessions[user_id]
+        if session.get("client"):
+            start_time = time.time()
+            alive, msg = await session["client"].check_session()
+            latency = round((time.time() - start_time) * 1000, 2)
+            if brain_debug:
+                logger.info(f"[BRAIN_DEBUG] Session Health Check | Alive: {alive} | Latency: {latency}ms | Reason: {msg}")
+            return {
+                "reachable": True,
+                "session_active": alive,
+                "latency_ms": latency,
+                "message": msg
+            }
+
+    url = "https://api.worldquantbrain.com"
+    start_time = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
+            res = await client.get(url)
+            latency = round((time.time() - start_time) * 1000, 2)
+            if brain_debug:
+                logger.info(f"[BRAIN_DEBUG] Reachability GET {url} | Status: {res.status_code} | Latency: {latency}ms")
+            
+            if res.status_code < 500:
+                return {
+                    "reachable": True,
+                    "session_active": False,
+                    "latency_ms": latency,
+                    "message": "WorldQuant BRAIN is reachable."
+                }
+            else:
+                return {
+                    "reachable": False,
+                    "session_active": False,
+                    "latency_ms": latency,
+                    "message": f"WorldQuant BRAIN base URL returned status {res.status_code}."
+                }
+    except Exception as e:
+        latency = round((time.time() - start_time) * 1000, 2)
+        if brain_debug:
+            logger.error(f"[BRAIN_DEBUG] Reachability GET {url} failed | Latency: {latency}ms | Error: {str(e)}")
+        return {
+            "reachable": False,
+            "session_active": False,
+            "latency_ms": latency,
+            "message": f"Could not reach WorldQuant BRAIN: {str(e)}"
+        }
+
+@app.post("/api/brain/auth/test")
+async def brain_auth_test(req: LoginRequest):
+    email = req.email.strip()
+    password = req.password
+    use_mock = req.use_mock
+    
+    import time
+    import os
+    brain_debug = os.environ.get("BRAIN_DEBUG", "false").lower() == "true"
+    
+    client = BrainClient(email, password, use_mock=use_mock)
+    start_time = time.time()
+    try:
+        if not use_mock:
+            async with client:
+                success, msg = await client.authenticate_step1()
+        else:
+            success, msg = await client.authenticate_step1()
+            
+        latency = round((time.time() - start_time) * 1000, 2)
+        
+        if brain_debug:
+            logger.info(f"[BRAIN_DEBUG] Auth test for {email} | Success: {success} | Message: {msg} | Latency: {latency}ms")
+            
+        if success:
+            return {
+                "success": True,
+                "otp_pending": msg == "OTP_SENT",
+                "message": "Credentials verified." if msg != "OTP_SENT" else "OTP sent to email.",
+                "error_code": None
+            }
+            
+        error_code = "BRAIN_AUTH_NETWORK_ERROR"
+        status_code = 400
+        if "401" in msg or "credentials" in msg.lower():
+            error_code = "BRAIN_AUTH_INVALID_CREDENTIALS"
+            status_code = 401
+        elif "403" in msg or "forbidden" in msg.lower() or "rejected" in msg.lower():
+            error_code = "BRAIN_AUTH_FORBIDDEN"
+            status_code = 403
+        elif "429" in msg or "rate" in msg.lower() or "attempts" in msg.lower():
+            error_code = "BRAIN_AUTH_RATE_LIMITED"
+            status_code = 429
+        elif "timeout" in msg.lower():
+            error_code = "BRAIN_AUTH_TIMEOUT"
+            status_code = 408
+        elif "network" in msg.lower() or "reach" in msg.lower():
+            error_code = "BRAIN_AUTH_NETWORK_ERROR"
+            status_code = 503
+            
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "success": False,
+                "otp_pending": False,
+                "message": msg,
+                "error_code": error_code
+            }
+        )
+    except Exception as e:
+        latency = round((time.time() - start_time) * 1000, 2)
+        if brain_debug:
+            logger.exception(f"[BRAIN_DEBUG] Auth test exception for {email}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "otp_pending": False,
+                "message": f"Unexpected error: {str(e)}",
+                "error_code": "BRAIN_AUTH_SYSTEM_ERROR"
+            }
+        )
 
 @app.get("/api/projects")
 async def get_projects(request: Request):
@@ -530,6 +711,71 @@ async def submit_passed_to_registry(request: Request, req: RegistrySubmitRequest
     if success:
         return {"success": True, "message": msg}
     return JSONResponse(status_code=400, content={"success": False, "message": msg})
+
+@app.post("/api/passed/submit-all-registry")
+async def submit_all_passed_to_registry(request: Request, req: RegistrySubmitAllRequest):
+    user_id = await get_current_user_id(request)
+    session = active_sessions.get(user_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired.")
+        
+    client = session["client"]
+    
+    async with AsyncSessionLocal() as db:
+        # Fetch all passed expressions with a valid brain_alpha_id for this project
+        result = await db.execute(
+            select(Simulation.brain_alpha_id)
+            .select_from(Expression)
+            .join(Simulation, Expression.id == Simulation.expression_id)
+            .where(Expression.project_id == req.project_id, Expression.status == "PASSED")
+        )
+        alpha_ids = [row[0] for row in result.all() if row[0]]
+        
+    if not alpha_ids:
+        return {"success": True, "submitted_count": 0, "message": "No qualified passed alphas with active IDs found to submit."}
+        
+    success_count = 0
+    failures = []
+    
+    for alpha_id in alpha_ids:
+        success, msg = await client.submit_alpha_for_review(alpha_id)
+        if success:
+            success_count += 1
+        else:
+            failures.append(f"{alpha_id}: {msg}")
+            
+    if failures:
+        return {
+            "success": success_count > 0,
+            "submitted_count": success_count,
+            "message": f"Submitted {success_count}/{len(alpha_ids)} alphas. Failures: {'; '.join(failures[:3])}"
+        }
+        
+    return {"success": True, "submitted_count": success_count, "message": f"Successfully submitted all {success_count} qualified alphas to the registry!"}
+
+@app.get("/api/debug/state")
+async def debug_state():
+    sessions_info = {}
+    for uid, sess in active_sessions.items():
+        sessions_info[uid] = {
+            "username": sess["username"],
+            "is_mock": sess["is_mock"],
+            "start_time": str(sess["start_time"]),
+            "client_authed": sess["client"].is_authenticated if sess.get("client") else False
+        }
+    
+    worker_clients = {}
+    for uid, client in simulation_worker._active_clients.items():
+        worker_clients[uid] = {
+            "email": client.email,
+            "is_mock": client.use_mock,
+            "is_authed": client.is_authenticated
+        }
+        
+    return {
+        "active_sessions": sessions_info,
+        "worker_clients": worker_clients
+    }
 
 # Mount the static files directory
 app.mount("/static", StaticFiles(directory="brain_farm/app/static"), name="static")

@@ -57,6 +57,49 @@ class BrainClient:
             return True
         return datetime.utcnow() - self._auth_time > timedelta(hours=SESSION_TTL_HOURS)
 
+    async def _send_request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        import os
+        brain_debug = os.environ.get("BRAIN_DEBUG", "false").lower() == "true"
+        
+        # Redact credentials and cookies for safe logging
+        if brain_debug:
+            clean_headers = {}
+            if "headers" in kwargs:
+                for k, v in kwargs["headers"].items():
+                    if k.lower() in ("authorization", "cookie"):
+                        clean_headers[k] = "[REDACTED]"
+                    else:
+                        clean_headers[k] = v
+            clean_auth = "[REDACTED]" if "auth" in kwargs else None
+            client_cookies = "[REDACTED]" if self.client and self.client.cookies else None
+            
+            logger.info(
+                f"[BRAIN_DEBUG] API Request: {method} {url} | Headers: {clean_headers} | Auth: {clean_auth} | Client Cookies: {client_cookies}"
+            )
+            
+        start_time = time.time()
+        try:
+            res = await self.client.request(method, url, **kwargs)
+            latency = round((time.time() - start_time) * 1000, 2)
+            if brain_debug:
+                clean_resp_headers = {}
+                for k, v in res.headers.items():
+                    if k.lower() in ("set-cookie", "authorization"):
+                        clean_resp_headers[k] = "[REDACTED]"
+                    else:
+                        clean_resp_headers[k] = v
+                logger.info(
+                    f"[BRAIN_DEBUG] API Response: {method} {url} | Status: {res.status_code} | Latency: {latency}ms | Headers: {clean_resp_headers}"
+                )
+            return res
+        except Exception as e:
+            latency = round((time.time() - start_time) * 1000, 2)
+            if brain_debug:
+                logger.error(
+                    f"[BRAIN_DEBUG] API Request Failed: {method} {url} | Latency: {latency}ms | Error: {str(e)}"
+                )
+            raise e
+
     async def check_session(self) -> Tuple[bool, str]:
         """
         Verify whether the current session is still valid against the live API.
@@ -77,7 +120,7 @@ class BrainClient:
 
         # Ping a lightweight endpoint to verify live cookie validity
         try:
-            res = await self.client.get(f"{self.base_url}/authentication")
+            res = await self._send_request("GET", f"{self.base_url}/authentication")
             if res.status_code in (200, 201):
                 return True, "Session is active."
             if res.status_code in (401, 403):
@@ -137,15 +180,33 @@ class BrainClient:
         auth_url = f"{self.base_url}/authentication"
 
         try:
+            import os
+            brain_debug = os.environ.get("BRAIN_DEBUG", "false").lower() == "true"
+            if brain_debug:
+                logger.info(f"[BRAIN_DEBUG] API Streaming Request: POST {auth_url} | Auth: [REDACTED]")
+            
+            start_time = time.time()
             # Open streaming request — reads headers without waiting for body
             self._auth_stream = self.client.stream(
-                "GET", auth_url, auth=(self.email, self.password)
+                "POST", auth_url, auth=(self.email, self.password)
             )
             res = await self._auth_stream.__aenter__()
 
+            latency = round((time.time() - start_time) * 1000, 2)
+            if brain_debug:
+                clean_resp_headers = {}
+                for k, v in res.headers.items():
+                    if k.lower() in ("set-cookie", "authorization"):
+                        clean_resp_headers[k] = "[REDACTED]"
+                    else:
+                        clean_resp_headers[k] = v
+                logger.info(
+                    f"[BRAIN_DEBUG] API Streaming Response: POST {auth_url} | Status: {res.status_code} | Latency: {latency}ms | Headers: {clean_resp_headers}"
+                )
+
             logger.info(f"Auth step1 stream headers: {res.status_code} | {dict(res.headers)}")
 
-            if res.status_code in (200, 201, 204):
+            if res.status_code in (200, 201):
                 # Direct success (no OTP needed)
                 self.is_authenticated = True
                 self._auth_time = datetime.utcnow()
@@ -193,7 +254,8 @@ class BrainClient:
 
         try:
             auth_url = f"{self.base_url}/authentication"
-            res = await self.client.patch(
+            res = await self._send_request(
+                "PATCH",
                 auth_url,
                 json={"otp": otp_code.strip()},
             )
@@ -222,7 +284,15 @@ class BrainClient:
             return False, f"Error: {str(e)}"
 
 
-    async def get_data_fields(self, region: str = "USA", universe: str = "TOP3000", limit: int = 50) -> Dict[str, Any]:
+    async def get_data_fields(
+        self,
+        region: str = "USA",
+        universe: str = "TOP3000",
+        limit: int = 50,
+        dataset: str = "fundamental6",
+        delay: int = 1,
+        instrument_type: str = "EQUITY"
+    ) -> Dict[str, Any]:
         """Fetch available data fields from the BRAIN data API."""
         if self.use_mock:
             await asyncio.sleep(0.2)
@@ -249,10 +319,17 @@ class BrainClient:
         if not self.is_authenticated or not self.client:
             raise Exception("Client is not authenticated.")
 
-        url = f"{self.base_url}/api/v2/data-fields"
-        params = {"region": region, "universe": universe, "limit": limit}
+        url = f"{self.base_url}/data-fields"
+        params = {
+            "region": region,
+            "universe": universe,
+            "dataset": dataset,
+            "delay": delay,
+            "instrumentType": instrument_type,
+            "limit": limit
+        }
         try:
-            res = await self.client.get(url, params=params)
+            res = await self._send_request("GET", url, params=params)
             if res.status_code == 200:
                 return res.json()
             if res.status_code in (401, 403):
@@ -306,9 +383,9 @@ class BrainClient:
         }
 
         try:
-            res = await self.client.post(f"{self.base_url}/simulations",
-                                         headers={"Content-Type": "application/json"},
-                                         json=payload)
+            res = await self._send_request("POST", f"{self.base_url}/simulations",
+                                           headers={"Content-Type": "application/json"},
+                                           json=payload)
             if res.status_code == 201:
                 location = res.headers.get("Location")
                 if not location:
@@ -391,7 +468,7 @@ class BrainClient:
             return None, "Client is not authenticated."
 
         try:
-            res = await self.client.get(f"{self.base_url}/simulations/{sim_id}")
+            res = await self._send_request("GET", f"{self.base_url}/simulations/{sim_id}")
             if res.status_code == 200:
                 return res.json(), None
             if res.status_code == 424:
@@ -420,7 +497,7 @@ class BrainClient:
             return False, "Client is not authenticated."
 
         try:
-            res = await self.client.post(f"{self.base_url}/registrations", json={"alpha": alpha_id})
+            res = await self._send_request("POST", f"{self.base_url}/registrations", json={"alpha": alpha_id})
             if res.status_code in (200, 201):
                 return True, "Alpha submitted for review on WorldQuant BRAIN!"
             if res.status_code in (401, 403):
