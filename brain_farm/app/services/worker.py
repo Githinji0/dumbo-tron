@@ -374,6 +374,25 @@ class SimulationWorker:
                     complexity_score=expr.complexity_score,
                     db=db
                 )
+
+                # Compute and populate parameter sensitivity and regime Performance JSON values
+                from brain_farm.app.services.sensitivity import ParameterSensitivityTester
+                from brain_farm.app.services.correlation_filter import CorrelationFilter
+                perturbed = ParameterSensitivityTester.generate_perturbed_expressions(expr.expression_text)
+                p_corrs = []
+                for p_expr in perturbed:
+                    p_corr = CorrelationFilter.calculate_correlation(expr.expression_text, p_expr)
+                    p_corrs.append({"expression": p_expr, "correlation": float(p_corr)})
+                
+                expr.parameter_sensitivity = {
+                    "penalty": float(ParameterSensitivityTester.evaluate_sensitivity_penalty(expr.expression_text, sharpe)),
+                    "correlations": p_corrs
+                }
+                
+                expr.regime_performance = {
+                    "sharpe_run_low": float(reg_m["sharpe_run_low"]),
+                    "sharpe_run_high": float(reg_m["sharpe_run_high"])
+                }
                 
                 # Save metrics to DB
                 metric = Metric(

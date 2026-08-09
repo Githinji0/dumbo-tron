@@ -938,7 +938,30 @@ async def get_analytics(project_id: int):
 async def get_passed_alphas(project_id: int):
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(Expression.expression_text, Simulation.brain_alpha_id, Metric.sharpe, Metric.fitness, Metric.turnover, Metric.margin, Expression.generator_type, Expression.id)
+            select(
+                Expression.expression_text,
+                Simulation.brain_alpha_id,
+                Metric.sharpe,
+                Metric.fitness,
+                Metric.turnover,
+                Metric.margin,
+                Expression.generator_type,
+                Expression.id,
+                Metric.rank_ic,
+                Metric.mean_ic,
+                Metric.median_ic,
+                Metric.ic_std_dev,
+                Metric.ic_ir,
+                Metric.positive_ic_ratio,
+                Metric.walk_forward_score,
+                Metric.regime_score,
+                Metric.composite_research_score,
+                Expression.complexity_score,
+                Expression.research_family,
+                Expression.hypothesis,
+                Expression.parameter_sensitivity,
+                Expression.regime_performance
+            )
             .select_from(Expression)
             .join(Simulation, Expression.id == Simulation.expression_id)
             .join(Metric, Simulation.id == Metric.simulation_id)
@@ -954,7 +977,21 @@ async def get_passed_alphas(project_id: int):
                 "turnover": round(p[4] * 100, 2),
                 "margin": round(p[5], 3),
                 "generator": p[6],
-                "db_id": p[7]
+                "db_id": p[7],
+                "rank_ic": round(p[8], 4) if p[8] is not None else 0.0,
+                "mean_ic": round(p[9], 4) if p[9] is not None else 0.0,
+                "median_ic": round(p[10], 4) if p[10] is not None else 0.0,
+                "ic_std_dev": round(p[11], 4) if p[11] is not None else 0.0,
+                "ic_ir": round(p[12], 4) if p[12] is not None else 0.0,
+                "positive_ic_ratio": round(p[13], 4) if p[13] is not None else 0.0,
+                "walk_forward_score": round(p[14], 3) if p[14] is not None else 0.0,
+                "regime_score": round(p[15], 3) if p[15] is not None else 0.0,
+                "composite_research_score": round(p[16], 3) if p[16] is not None else 0.0,
+                "complexity_score": round(p[17], 2) if p[17] is not None else 0.0,
+                "research_family": p[18] if p[18] else "N/A",
+                "hypothesis": p[19] if p[19] else "N/A",
+                "parameter_sensitivity": p[20],
+                "regime_performance": p[21]
             }
             for p in result.all()
         ]

@@ -6,11 +6,12 @@ An enterprise-grade, asynchronous, and modular Alpha Farming Platform for WorldQ
 
 ## 🛠️ Architecture Stack
 
-- **Frontend**: Streamlit Dashboard
+- **Frontend**: Tailwind CSS & Vanilla JS FastAPI Web UI / Streamlit Dashboard
 - **Backend ORM**: SQLAlchemy 2.0 with Async SQLite (`aiosqlite`)
 - **Async client**: `httpx` async communication core
 - **Security**: Symmetry Cryptography Fernet keys encryption
-- **Formula Engines**: Templates, Recursive AST Generator, Mutation Parser, Genetic Crossover, and LLM Optimizer.
+- **Analytical Metrics**: Walk-forward stability, Volatility-regime Sharpe, Pearson sensitivity correlations, and Rank IC Calculator.
+- **Formula Engines**: Templates, Recursive AST Generator (with Research Family specs), Mutation Parser, Genetic Crossover, and LLM Optimizer.
 
 ---
 
@@ -36,9 +37,15 @@ GEMINI_API_KEY=your_gemini_key
 
 3. **Start the FastAPI Application Server**:
 ```bash
-uvicorn brain_farm.app.server:app --reload --port 8501
+uvicorn brain_farm.app.server:app --reload --port 8502
 ```
-This opens the clean green charcoal interface at `http://localhost:8501`.
+This serves the API backend and the interactive Web UI Dashboard at `http://localhost:8502`.
+
+4. **Start the Streamlit UI Dashboard (Optional)**:
+```bash
+streamlit run brain_farm/app/ui/main.py --server.port 8501
+```
+This opens the Streamlit frontend interface at `http://localhost:8501`.
 
 ---
 
@@ -66,9 +73,23 @@ python -m pytest tests/
 
 ---
 
-## 💡 Farming Engines Explained
+## 💡 Farming Engines & Optimization
 
-1. **Recursive AST Generator**: Models arithmetic operators, lookbacks, and cross-sectional functions as node objects. Recursively joins structures up to a target depth limits, automatically simplifying duplicate expressions (e.g. `rank(rank(x)) -> rank(x)`).
+1. **Recursive AST Generator**: Models arithmetic operators, lookbacks, and cross-sectional functions as node objects. Generates family-specific formulas (e.g., trend following, mean reversion) up to a target depth limit, automatically simplifying duplicate expressions (e.g., `rank(rank(x)) -> rank(x)`).
 2. **Genetic Crossover Engine**: Performs tournament selections over mock historical simulation records, runs subtree switches to cross parents, and introduces random mutations.
 3. **Mutation Generator**: Applies window parameters tweaks, operator interchanges, neutralisation changes, or wraps expressions in time-decays to control turnover.
-4. **Auto-Optimizer**: Spawns automatically on failed simulations. Inspects failing targets (e.g., Turnover exceeded, Sharpe too low) and applies custom heuristics (e.g. adding decays, group neutralisation) to queue improved candidates in real-time.
+4. **Auto-Optimizer**: Spawns automatically on failed simulations, applies custom mutation heuristics in real-time, and queues improved candidates.
+5. **Dynamic Priority Allocation Engine**: Follows a Bayesian allocation framework. Evaluates historical performance metrics of different Research Families and dynamically adjusts slot priorities to focus computation on high-performing alpha styles.
+
+---
+
+## 📊 Advanced Metrics & Alpha Inspector
+
+Upon simulation completion, candidate alphas undergo rigorous statistical validation before staging:
+
+*   **Rank IC & Information Ratio (IR):** Estimates daily cross-sectional Spearman Rank IC, mean, median, standard deviation, and IC IR to measure predictive power stability.
+*   **Walk-Forward Out-of-Sample evaluation:** Partitions historical returns into training/test phases to verify that performance remains stable on unseen data.
+*   **Volatility Regime Performance:** Categorizes returns under low and high volatility regimes, computing conditional Sharpe ratios to identify market regime sensitivity.
+*   **Parameter Sensitivity & AST Perturbation:** Extracts lookback window parameters, introduces structural perturbations, and measures signal correlation stability.
+*   **Weighted Composite Scorer:** Integrates Research, Robustness (stability + regime score + sensitivity safety), Diversity (cross-correlation avoidance), and Simplicity (complexity overhead penalty) into a single unified rating.
+*   **Advanced Alpha Inspector Dashboard:** Visualized on the FastAPI Web UI interface, allowing researchers to click any passed candidate to view detailed stability stats, parameter variations, and economic hypothesis lineage.

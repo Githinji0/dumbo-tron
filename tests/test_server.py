@@ -170,3 +170,41 @@ def test_classify_error_string():
     res = classify_error_string('RATE_LIMIT:15')
     assert res["category"] == "RATE_LIMIT_ERROR"
 
+def test_passed_alphas_endpoint_regression():
+    payload = {
+        "email": "testuser@mock.com",
+        "password": "mockpassword",
+        "use_mock": True
+    }
+    resp_login = client.post("/api/auth/login", json=payload)
+    cookies = resp_login.cookies
+    
+    response = client.get("/api/passed?project_id=1", cookies=cookies)
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    for item in data:
+        assert "alpha_id" in item
+        assert "expression" in item
+        assert "sharpe" in item
+        assert "fitness" in item
+        assert "turnover" in item
+        assert "margin" in item
+        assert "generator" in item
+        assert "db_id" in item
+        assert "rank_ic" in item
+        assert "mean_ic" in item
+        assert "median_ic" in item
+        assert "ic_std_dev" in item
+        assert "ic_ir" in item
+        assert "positive_ic_ratio" in item
+        assert "walk_forward_score" in item
+        assert "regime_score" in item
+        assert "composite_research_score" in item
+        assert "complexity_score" in item
+        assert "research_family" in item
+        assert "hypothesis" in item
+        assert "parameter_sensitivity" in item
+        assert "regime_performance" in item
+
+

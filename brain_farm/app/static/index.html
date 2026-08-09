@@ -490,29 +490,162 @@
           </div>
 
           <div id="passedContentWrapper">
-            <!-- Table listing -->
-            <div class="card">
-              <h3>Qualified Passed Candidate Alphas</h3>
-              <div class="table-container" style="max-height: 400px; overflow-y: auto;">
-                <table class="grid-table" id="passedAlphasTable">
-                  <thead>
-                    <tr>
-                      <th style="width: 140px;">Alpha ID</th>
-                      <th>Expression Formula</th>
-                      <th style="width: 80px;">Sharpe</th>
-                      <th style="width: 80px;">Fitness</th>
-                      <th style="width: 90px;">Turnover</th>
-                      <th style="width: 90px;">Margin</th>
-                      <th style="width: 110px;">Generator</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td colspan="7" class="text-center">No qualified passed alphas recorded in this project context.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+            <div class="grid-2col" style="grid-template-columns: 1.2fr 0.8fr; margin-bottom: 25px;">
+              <!-- Table listing -->
+              <div class="card">
+                <h3>Qualified Passed Candidate Alphas</h3>
+                <div class="table-container" style="max-height: 420px; overflow-y: auto;">
+                  <table class="grid-table" id="passedAlphasTable" style="cursor: pointer;">
+                    <thead>
+                      <tr>
+                        <th style="width: 140px;">Alpha ID</th>
+                        <th>Expression Formula</th>
+                        <th style="width: 70px;">Sharpe</th>
+                        <th style="width: 70px;">Fitness</th>
+                        <th style="width: 80px;">Turnover</th>
+                        <th style="width: 80px;">Margin</th>
+                        <th style="width: 95px;">Generator</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td colspan="7" class="text-center">No qualified passed alphas recorded in this project context.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Alpha Details Inspector Card -->
+              <div class="card" id="alphaDetailsInspectorCard" style="display: flex; flex-direction: column;">
+                <h3>Advanced Alpha Inspector</h3>
+                <div id="inspectorDetailsPlaceholder">
+                  <p class="placeholder-text" style="margin-top: 100px;">Click on any passed alpha row to view extensive
+                    backtest metrics, stability analytics, parameter sensitivity, and economic hypothesis.</p>
+                </div>
+                <div id="inspectorDetailsContent" style="display: none; font-size: 13px;">
+                  <div style="margin-bottom: 12px;">
+                    <div
+                      style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <strong style="color: var(--primary-accent); font-size: 15px;" id="inspectAlphaId"></strong>
+                      <span class="badge" id="inspectGenerator"
+                        style="background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color);"></span>
+                    </div>
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); font-family: monospace; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"
+                      id="inspectExpression"></div>
+                  </div>
+
+                  <div style="margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                      <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Research
+                        Family</div>
+                      <strong id="inspectFamily" style="color: var(--info);"></strong>
+                    </div>
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                      <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Complexity
+                        Score</div>
+                      <strong id="inspectComplexity" style="color: var(--warning);"></strong>
+                    </div>
+                  </div>
+
+                  <div
+                    style="margin-bottom: 12px; background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                      <span style="font-weight: 600; color: var(--primary-accent);">Weighted Composite Rating</span>
+                      <strong id="inspectCompositeScore"
+                        style="font-size: 14px; color: var(--primary-accent);"></strong>
+                    </div>
+                    <div
+                      style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; margin-top: 8px; font-size: 11px;">
+                      <div style="border-right: 1px solid var(--border-color);">
+                        <div style="color: var(--text-secondary);">Research</div>
+                        <span id="inspectSubResearch" style="font-weight: 600;"></span>
+                      </div>
+                      <div style="border-right: 1px solid var(--border-color);">
+                        <div style="color: var(--text-secondary);">Robustness</div>
+                        <span id="inspectSubRobustness" style="font-weight: 600;"></span>
+                      </div>
+                      <div style="border-right: 1px solid var(--border-color);">
+                        <div style="color: var(--text-secondary);">Diversity</div>
+                        <span id="inspectSubDiversity" style="font-weight: 600;"></span>
+                      </div>
+                      <div>
+                        <div style="color: var(--text-secondary);">Simplicity</div>
+                        <span id="inspectSubSimplicity" style="font-weight: 600;"></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                      <h4
+                        style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">
+                        IC stats & stability</h4>
+                      <div
+                        style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; font-size: 11px;">
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>Rank IC / Mean:</span>
+                          <strong id="inspectRankIc"></strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>IC IR:</span>
+                          <strong id="inspectIcIr"></strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>Positive Ratio:</span>
+                          <strong id="inspectPosRatio"></strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>Walk-Forward Score:</span>
+                          <strong id="inspectWalkForward" style="color: var(--info);"></strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4
+                        style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">
+                        Volatility Regimes</h4>
+                      <div
+                        style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; font-size: 11px;">
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>Regime Score:</span>
+                          <strong id="inspectRegimeScore" style="color: var(--info);"></strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>Low Vol Sharpe:</span>
+                          <strong id="inspectLowVolSharpe"></strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                          <span>High Vol Sharpe:</span>
+                          <strong id="inspectHighVolSharpe"></strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4
+                      style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">
+                      Parameter Sensitivity</h4>
+                    <div
+                      style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; font-size: 11px;">
+                      <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span>Sensitivity Penalty Factor:</span>
+                        <strong id="inspectSensitivityPenalty"></strong>
+                      </div>
+                      <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">Perturbation
+                        Stability (Pearson Correlation):</div>
+                      <div id="inspectSensitivityList"
+                        style="max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

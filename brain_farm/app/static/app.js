@@ -1112,6 +1112,106 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function selectPassedAlpha(alpha) {
+    // Highlight table row
+    const rows = document.querySelectorAll("#passedAlphasTable tbody tr");
+    rows.forEach(r => {
+      const dbIdVal = r.getAttribute("data-db-id");
+      if (dbIdVal === String(alpha.db_id)) {
+        r.classList.add("active-row");
+        r.style.backgroundColor = "var(--bg-hover)";
+        r.style.borderLeft = "4px solid var(--primary-accent)";
+      } else {
+        r.classList.remove("active-row");
+        r.style.backgroundColor = "";
+        r.style.borderLeft = "";
+      }
+    });
+
+    document.getElementById("inspectorDetailsPlaceholder").style.display = "none";
+    const content = document.getElementById("inspectorDetailsContent");
+    content.style.display = "block";
+
+    // Set values
+    document.getElementById("inspectAlphaId").innerText = alpha.alpha_id;
+    document.getElementById("inspectGenerator").innerText = alpha.generator;
+    document.getElementById("inspectExpression").innerText = alpha.expression;
+    document.getElementById("inspectFamily").innerText = alpha.research_family || "N/A";
+    document.getElementById("inspectComplexity").innerText = alpha.complexity_score || "N/A";
+
+    const compScore = alpha.composite_research_score !== undefined ? alpha.composite_research_score : 0.0;
+    document.getElementById("inspectCompositeScore").innerText = compScore.toFixed(3);
+
+    // Components calculation from metrics
+    const research = (alpha.sharpe / 6.0) + (alpha.fitness / 6.0);
+    const simplicity = 1.0 - ((alpha.complexity_score || 1.0) - 1.0) / 19.0;
+    const diversity = alpha.correlation_score !== undefined ? alpha.correlation_score : 1.0;
+
+    const penalty = (alpha.parameter_sensitivity && alpha.parameter_sensitivity.penalty !== undefined)
+      ? alpha.parameter_sensitivity.penalty
+      : 1.0;
+    const rawRobustness = ((alpha.walk_forward_score || 0.0) + (alpha.regime_score || 0.0)) / 2.0;
+    const robustness = rawRobustness * penalty;
+
+    document.getElementById("inspectSubResearch").innerText = Math.max(0.0, Math.min(1.0, research)).toFixed(2);
+    document.getElementById("inspectSubRobustness").innerText = Math.max(0.0, Math.min(1.0, robustness)).toFixed(2);
+    document.getElementById("inspectSubDiversity").innerText = Math.max(0.0, Math.min(1.0, diversity)).toFixed(2);
+    document.getElementById("inspectSubSimplicity").innerText = Math.max(0.0, Math.min(1.0, simplicity)).toFixed(2);
+
+    // IC stats
+    document.getElementById("inspectRankIc").innerText = alpha.rank_ic !== undefined ? alpha.rank_ic.toFixed(4) : "N/A";
+    document.getElementById("inspectIcIr").innerText = alpha.ic_ir !== undefined ? alpha.ic_ir.toFixed(4) : "N/A";
+    const posRatio = alpha.positive_ic_ratio !== undefined ? (alpha.positive_ic_ratio * 100).toFixed(1) + "%" : "N/A";
+    document.getElementById("inspectPosRatio").innerText = posRatio;
+    document.getElementById("inspectWalkForward").innerText = alpha.walk_forward_score !== undefined ? alpha.walk_forward_score.toFixed(3) : "N/A";
+
+    // Regimes
+    document.getElementById("inspectRegimeScore").innerText = alpha.regime_score !== undefined ? alpha.regime_score.toFixed(3) : "N/A";
+    const regPerf = alpha.regime_performance || {};
+    document.getElementById("inspectLowVolSharpe").innerText = regPerf.sharpe_run_low !== undefined ? regPerf.sharpe_run_low.toFixed(3) : "N/A";
+    document.getElementById("inspectHighVolSharpe").innerText = regPerf.sharpe_run_high !== undefined ? regPerf.sharpe_run_high.toFixed(3) : "N/A";
+
+    // Sensitivity
+    document.getElementById("inspectSensitivityPenalty").innerText = penalty.toFixed(2);
+    const sensList = document.getElementById("inspectSensitivityList");
+    sensList.innerHTML = "";
+
+    const sensData = alpha.parameter_sensitivity || {};
+    const corrs = sensData.correlations || [];
+    if (corrs.length === 0) {
+      sensList.innerHTML = '<div style="color: var(--text-secondary); font-style: italic;">No lookback parameters perturbed or identified.</div>';
+    } else {
+      corrs.forEach(item => {
+        const itemDiv = document.createElement("div");
+        itemDiv.style.display = "flex";
+        itemDiv.style.justify = "space-between";
+        itemDiv.style.padding = "2px 0";
+        itemDiv.style.borderBottom = "1px solid rgba(255,255,255,0.03)";
+
+        const codeSpan = document.createElement("span");
+        codeSpan.style.fontFamily = "monospace";
+        codeSpan.style.overflow = "hidden";
+        codeSpan.style.textOverflow = "ellipsis";
+        codeSpan.style.whiteSpace = "nowrap";
+        codeSpan.style.maxWidth = "70%";
+        codeSpan.innerText = item.expression;
+        codeSpan.title = item.expression;
+
+        const corrVal = document.createElement("strong");
+        corrVal.innerText = item.correlation.toFixed(3);
+        if (item.correlation > 0.85) {
+          corrVal.style.color = "var(--primary-accent)";
+        } else {
+          corrVal.style.color = "var(--warning)";
+        }
+
+        itemDiv.appendChild(codeSpan);
+        itemDiv.appendChild(corrVal);
+        sensList.appendChild(itemDiv);
+      });
+    }
+  }
+
   // Passed candidates results view
   async function loadPassedResults() {
     if (!activeProjectId) return;
@@ -1133,11 +1233,16 @@ document.addEventListener("DOMContentLoaded", () => {
         opt.value = "";
         opt.innerText = "No alphas available to register";
         select.appendChild(opt);
+
+        document.getElementById("inspectorDetailsPlaceholder").style.display = "block";
+        document.getElementById("inspectorDetailsContent").style.display = "none";
         return;
       }
 
       passed.forEach(p => {
         const tr = document.createElement("tr");
+        tr.setAttribute("data-db-id", String(p.db_id));
+        tr.addEventListener("click", () => selectPassedAlpha(p));
 
         const idTd = document.createElement("td");
         idTd.innerHTML = `<code>${p.alpha_id}</code>`;
@@ -1184,6 +1289,14 @@ document.addEventListener("DOMContentLoaded", () => {
         opt.value = "";
         opt.innerText = "No registered Alpha IDs found (Wait for worker polling)";
         select.appendChild(opt);
+      }
+
+      // Auto-select first row
+      if (passed.length > 0) {
+        selectPassedAlpha(passed[0]);
+      } else {
+        document.getElementById("inspectorDetailsPlaceholder").style.display = "block";
+        document.getElementById("inspectorDetailsContent").style.display = "none";
       }
     } catch (err) {
       console.error(err);
