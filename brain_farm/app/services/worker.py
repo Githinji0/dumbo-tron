@@ -112,6 +112,27 @@ class SimulationWorker:
             from brain_farm.app.services.correlation_filter import CorrelationFilter
 
             for expr in exprs:
+                # 1. Fast local database checking against ALL expressions (not just PASSED)
+                dup_res = await db.execute(
+                    select(Expression)
+                    .where(Expression.project_id == expr.project_id)
+                    .where(Expression.expression_text == expr.expression_text)
+                    .where(Expression.id < expr.id)
+                    .limit(1)
+                )
+                duplicate = dup_res.scalar_one_or_none()
+                if duplicate:
+                    expr.status = "REJECTED"
+                    reason = f"Duplicate of existing expression ID {duplicate.id} (Status: {duplicate.status})"
+                    log = ProjectLog(
+                        project_id=expr.project_id,
+                        level="WARNING",
+                        message=f"Duplicate Checker: Rejected '{expr.expression_text[:35]}...' -> {reason}"
+                    )
+                    db.add(log)
+                    logger.warning(f"Duplicate Checker: Rejected expression {expr.id} -> {reason}")
+                    continue
+
                 # Query already PASSED expressions in the projects pool to match against
                 passed_res = await db.execute(
                     select(Expression.expression_text)
@@ -122,26 +143,26 @@ class SimulationWorker:
                 
                 is_redundant = False
                 reason = ""
-                for passed in passed_formulas:
-                    if expr.expression_text.strip() == passed.strip():
-                        is_redundant = True
-                        reason = "Exact duplicate of a passed Alpha expression"
-                        break
-                    
-                    # Calculate synthetic Pearson correlation
-                    corr = CorrelationFilter.calculate_correlation(expr.expression_text, passed)
-                    if abs(corr) > 0.85:
-                        is_redundant = True
-                        reason = f"Highly correlated (Pearson = {corr:.2f}) with passed Alpha: '{passed[:30]}...'"
-                        break
-                        
-                    # Calculate Jaccard similarity
-                    jacc = CorrelationFilter.calculate_ast_similarity(expr.expression_text, passed)
-                    if jacc > 0.90:
-                        is_redundant = True
-                        reason = f"Syntactically redundant (Jaccard = {jacc:.2f}) with passed Alpha: '{passed[:30]}...'"
-                        break
-                
+
+                def _run_correlation_check(expr_text: str, passed_list: list) -> tuple[bool, str]:
+                    """CPU-bound correlation checks — run inside a thread pool."""
+                    from brain_farm.app.services.correlation_filter import CorrelationFilter
+                    for passed in passed_list:
+                        if expr_text.strip() == passed.strip():
+                            return True, "Exact duplicate of a passed Alpha expression"
+                        corr = CorrelationFilter.calculate_correlation(expr_text, passed)
+                        if abs(corr) > 0.85:
+                            return True, f"Highly correlated (Pearson = {corr:.2f}) with passed Alpha: '{passed[:30]}...'"
+                        jacc = CorrelationFilter.calculate_ast_similarity(expr_text, passed)
+                        if jacc > 0.90:
+                            return True, f"Syntactically redundant (Jaccard = {jacc:.2f}) with passed Alpha: '{passed[:30]}...'"
+                    return False, ""
+
+                loop = asyncio.get_event_loop()
+                is_redundant, reason = await loop.run_in_executor(
+                    None, _run_correlation_check, expr.expression_text, passed_formulas
+                )
+
                 if is_redundant:
                     expr.status = "REJECTED"
                     
@@ -333,6 +354,27 @@ class SimulationWorker:
                 margin = float(is_data.get("margin", 0.0))
                 drawdown = float(is_data.get("drawdown", 0.0)) if is_data.get("drawdown") else 0.0
                 
+                # Compute advanced Phase 3 metrics
+                from brain_farm.app.services.ic_calculator import ICCalculator
+                from brain_farm.app.services.walk_forward import WalkForwardTester
+                from brain_farm.app.services.regime_analyzer import RegimeAnalyzer
+                from brain_farm.app.services.composite_scorer import WeightedCompositeScorer
+                
+                ic_m = ICCalculator.calculate_ic_metrics(expr.expression_text, sharpe)
+                wf_m = WalkForwardTester.evaluate_walk_forward(expr.expression_text, sharpe)
+                reg_m = RegimeAnalyzer.evaluate_regimes(expr.expression_text, sharpe)
+                
+                comp_res = await WeightedCompositeScorer.compute_composite_score(
+                    expr_text=expr.expression_text,
+                    project_id=proj.id,
+                    sharpe=sharpe,
+                    fitness=fitness,
+                    walk_forward_score=wf_m["walk_forward_score"],
+                    regime_score=reg_m["regime_score"],
+                    complexity_score=expr.complexity_score,
+                    db=db
+                )
+                
                 # Save metrics to DB
                 metric = Metric(
                     simulation_id=sim.id,
@@ -343,7 +385,19 @@ class SimulationWorker:
                     margin=margin,
                     drawdown=drawdown,
                     long_count=int(data.get("longCount", 0)) if data.get("longCount") else None,
-                    short_count=int(data.get("shortCount", 0)) if data.get("shortCount") else None
+                    short_count=int(data.get("shortCount", 0)) if data.get("shortCount") else None,
+                    
+                    # Advanced metrics columns
+                    rank_ic=ic_m["rank_ic"],
+                    mean_ic=ic_m["mean_ic"],
+                    median_ic=ic_m["median_ic"],
+                    ic_std_dev=ic_m["ic_std_dev"],
+                    ic_ir=ic_m["ic_ir"],
+                    positive_ic_ratio=ic_m["positive_ic_ratio"],
+                    walk_forward_score=wf_m["walk_forward_score"],
+                    regime_score=reg_m["regime_score"],
+                    correlation_score=comp_res["diversity_score"],
+                    composite_research_score=comp_res["composite_score"]
                 )
                 db.add(metric)
                 

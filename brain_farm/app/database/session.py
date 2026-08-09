@@ -42,4 +42,55 @@ async def init_db():
     engine = _make_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Auto-migrate/inspect columns for sqlite
+        def migrate_sqlite(connection):
+            dbapi_conn = connection.connection
+            cursor = dbapi_conn.cursor()
+            
+            # Expressions table cols
+            cursor.execute("PRAGMA table_info(expressions)")
+            expr_cols = {row[1] for row in cursor.fetchall()}
+            
+            expr_additions = [
+                ("research_family", "VARCHAR(100)"),
+                ("hypothesis", "TEXT"),
+                ("lineage_id", "INTEGER"),
+                ("complexity_score", "FLOAT"),
+                ("parameter_sensitivity", "JSON"),
+                ("regime_performance", "JSON")
+            ]
+            
+            for col_name, col_type in expr_additions:
+                if col_name not in expr_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE expressions ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
+                        
+            # Metrics table cols
+            cursor.execute("PRAGMA table_info(metrics)")
+            metrics_cols = {row[1] for row in cursor.fetchall()}
+            
+            metric_additions = [
+                ("rank_ic", "FLOAT DEFAULT 0.0"),
+                ("mean_ic", "FLOAT DEFAULT 0.0"),
+                ("median_ic", "FLOAT DEFAULT 0.0"),
+                ("ic_std_dev", "FLOAT DEFAULT 0.0"),
+                ("ic_ir", "FLOAT DEFAULT 0.0"),
+                ("positive_ic_ratio", "FLOAT DEFAULT 0.0"),
+                ("walk_forward_score", "FLOAT DEFAULT 0.0"),
+                ("regime_score", "FLOAT DEFAULT 0.0"),
+                ("correlation_score", "FLOAT DEFAULT 0.0"),
+                ("composite_research_score", "FLOAT DEFAULT 0.0")
+            ]
+            
+            for col_name, col_type in metric_additions:
+                if col_name not in metrics_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE metrics ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
+                        
+        await conn.run_sync(migrate_sqlite)
     await engine.dispose()

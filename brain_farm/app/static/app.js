@@ -11,6 +11,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let activeProjectId = null;
   let pollIntervalId = null;
   let logPollIntervalId = null;
+  let analyticsPollingId = null;
+  let lastRunningCount = 0;
 
   // Chart instances
   let scatterChart = null;
@@ -63,12 +65,13 @@ document.addEventListener("DOMContentLoaded", () => {
       updateFarmingViewWarnings();
     } else if (viewId === "live-queue") {
       startQueuePolling();
+      stopAnalyticsPolling();
+    } else if (viewId === "analytics") {
+      stopQueuePolling();
+      startAnalyticsPolling();
     } else {
       stopQueuePolling();
-    }
-
-    if (viewId === "analytics") {
-      loadAnalyticsData();
+      stopAnalyticsPolling();
     }
 
     if (viewId === "passed-results") {
@@ -211,10 +214,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // Engine Selection Change wrapper
     document.getElementById("farmEngineSelect").addEventListener("change", (e) => {
       const depthWrapper = document.getElementById("astDepthWrapper");
+      const familyWrapper = document.getElementById("familySelectWrapper");
       if (e.target.value === "Recursive AST Generator") {
         depthWrapper.style.display = "block";
       } else {
         depthWrapper.style.display = "none";
+      }
+      if (e.target.value === "Research Family Generator") {
+        familyWrapper.style.display = "block";
+      } else {
+        familyWrapper.style.display = "none";
       }
     });
 
@@ -622,6 +631,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const engine = document.getElementById("farmEngineSelect").value;
     const count = parseInt(document.getElementById("farmCountRange").value);
     const depth = parseInt(document.getElementById("astDepthRange").value);
+    const researchFamily = document.getElementById("farmEngineSelect").value === "Research Family Generator" ? document.getElementById("farmFamilySelect").value : null;
 
     const launchBtn = document.getElementById("btnLaunchFarmingJob");
     launchBtn.disabled = true;
@@ -636,7 +646,8 @@ document.addEventListener("DOMContentLoaded", () => {
           project_id: activeProjectId,
           engine,
           count,
-          ast_depth: depth
+          ast_depth: depth,
+          research_family: researchFamily
         })
       });
       const data = await res.json();
@@ -708,6 +719,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Analytics Polling
+  function startAnalyticsPolling() {
+    stopAnalyticsPolling();
+    loadAnalyticsData();
+    analyticsPollingId = setInterval(loadAnalyticsData, 5000);
+  }
+
+  function stopAnalyticsPolling() {
+    if (analyticsPollingId) {
+      clearInterval(analyticsPollingId);
+      analyticsPollingId = null;
+    }
+  }
+
   async function loadQueueData() {
     if (!activeProjectId) return;
     try {
@@ -716,6 +741,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       document.getElementById("statQueuePending").innerText = data.pending_count;
       document.getElementById("statQueueRunning").innerText = data.running_count;
+
+      // When running count drops to 0 (simulations just finished), refresh analytics
+      if (lastRunningCount > 0 && data.running_count === 0) {
+        loadAnalyticsData();
+      }
+      lastRunningCount = data.running_count;
 
       const tbody = document.querySelector("#queueSimulationsTable tbody");
       tbody.innerHTML = "";

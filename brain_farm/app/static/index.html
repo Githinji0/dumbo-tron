@@ -282,10 +282,35 @@
                 <label for="farmEngineSelect">Generation Approach Engine</label>
                 <select id="farmEngineSelect">
                   <option value="Template Generator">Template Generator</option>
+                  <option value="Research Family Generator">Research Family Generator</option>
                   <option value="Recursive AST Generator" selected>Recursive AST Generator</option>
                   <option value="Mutation Engine">Mutation Engine</option>
                   <option value="Genetic Crossover Engine">Genetic Crossover Engine</option>
                   <option value="LLM-AI Optimizer">LLM-AI Optimizer</option>
+                </select>
+              </div>
+
+              <div class="form-group" id="familySelectWrapper" style="display:none;">
+                <label for="farmFamilySelect">Research Family Template</label>
+                <select id="farmFamilySelect">
+                  <option value="ALL">All Families (Dynamic Portfolio)</option>
+                  <option value="MOMENTUM">Momentum (MOMENTUM)</option>
+                  <option value="REVERSAL">Reversal (REVERSAL)</option>
+                  <option value="VALUE">Value (VALUE)</option>
+                  <option value="QUALITY">Quality (QUALITY)</option>
+                  <option value="EARNINGS">Earnings (EARNINGS)</option>
+                  <option value="ANALYST">Analyst Estimates (ANALYST)</option>
+                  <option value="VOLATILITY">Volatility (VOLATILITY)</option>
+                  <option value="LIQUIDITY">Liquidity (LIQUIDITY)</option>
+                  <option value="PRICE_VOLUME">Price-Volume (PRICE_VOLUME)</option>
+                  <option value="GROWTH">Growth (GROWTH)</option>
+                  <option value="CASH_FLOW">Cash Flow (CASH_FLOW)</option>
+                  <option value="BALANCE_SHEET">Balance Sheet (BALANCE_SHEET)</option>
+                  <option value="SENTIMENT">Sentiment (SENTIMENT)</option>
+                  <option value="INSIDER">Insider Activity (INSIDER)</option>
+                  <option value="SHORT_INTEREST">Short Interest (SHORT_INTEREST)</option>
+                  <option value="OPTIONS">Options (OPTIONS)</option>
+                  <option value="MULTI_FACTOR">Multi-Factor (MULTI_FACTOR)</option>
                 </select>
               </div>
 

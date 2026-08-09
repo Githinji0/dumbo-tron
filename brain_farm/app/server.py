@@ -108,6 +108,7 @@ class LaunchFarmRequest(BaseModel):
     engine: str
     count: int
     ast_depth: int = 3
+    research_family: Optional[str] = None
 
 class SingleSubmissionRequest(BaseModel):
     project_id: int
@@ -513,6 +514,17 @@ async def sync_fields(request: Request, req: FieldSyncRequest):
         count = await FieldManager.sync_cache_with_api(db, session["client"], req.region, req.universe)
         return {"success": True, "count": count}
 
+def calculate_complexity_score(expr: str) -> float:
+    """Computes a token-based complexity score for an expression."""
+    import re
+    from brain_farm.app.evaluators.validator import ALLOWED_OPERATORS
+    words = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", expr)
+    op_count = sum(1 for w in words if w in ALLOWED_OPERATORS)
+    math_symbols = sum(expr.count(c) for c in ["+", "-", "*", "/", "<", ">", "="])
+    paren_count = expr.count("(")
+    complexity = float(op_count * 2 + math_symbols + paren_count + len(words) * 0.5)
+    return max(1.0, complexity)
+
 @app.post("/api/farm/launch")
 async def launch_farm(request: Request, req: LaunchFarmRequest):
     user_id = await get_current_user_id(request)
@@ -522,52 +534,166 @@ async def launch_farm(request: Request, req: LaunchFarmRequest):
         res_fields = await FieldManager.get_all_fields(db)
         p_fields = [f.id for f in res_fields]
         
+        # We store candidates as a list of tuples: (expression_text, parent_obj, family_name, hypothesis_text)
+        candidates_with_meta = []
+        
         # Generator initialization
         if req.engine == "Template Generator":
             generator = TemplateGenerator(p_fields)
-            candidates = generator.generate(req.count)
+            texts = generator.generate(req.count)
+            candidates_with_meta = [(t, None, None, None) for t in texts]
+            
+        elif req.engine == "Research Family Generator":
+            from brain_farm.app.generators.family_gen import FamilyGenerator
+            from brain_farm.app.generators.family_info import RESEARCH_FAMILIES
+            from brain_farm.app.services.priority_engine import ResearchPriorityEngine
+            
+            selected_family = req.research_family
+            if not selected_family or selected_family == "ALL":
+                # Compute Bayesian slots allocation
+                allocations = await ResearchPriorityEngine.allocate_generation_slots(req.project_id, req.count, db)
+                for fam, fam_cnt in allocations.items():
+                    gen = FamilyGenerator(p_fields, family_name=fam)
+                    fam_cands = gen.generate(fam_cnt)
+                    for t in fam_cands:
+                        candidates_with_meta.append((t, None, fam, RESEARCH_FAMILIES[fam].get("description", "")))
+            else:
+                # Direct single family generation
+                gen = FamilyGenerator(p_fields, family_name=selected_family)
+                fam_cands = gen.generate(req.count)
+                for t in fam_cands:
+                    candidates_with_meta.append((t, None, selected_family, RESEARCH_FAMILIES[selected_family].get("description", "")))
+            
+            # Fallback retry loop if the generator is short on candidates
+            if len(candidates_with_meta) < req.count:
+                import random
+                families_to_use = list(RESEARCH_FAMILIES.keys()) if (not selected_family or selected_family == "ALL") else [selected_family]
+                attempts = 0
+                max_attempts = req.count * 10
+                while len(candidates_with_meta) < req.count and attempts < max_attempts:
+                    attempts += 1
+                    fam = random.choice(families_to_use)
+                    gen = FamilyGenerator(p_fields, family_name=fam)
+                    fam_cands = gen.generate(1)
+                    if fam_cands and fam_cands[0] not in [c[0] for c in candidates_with_meta]:
+                        candidates_with_meta.append((fam_cands[0], None, fam, RESEARCH_FAMILIES[fam].get("description", "")))
+                
         elif req.engine == "Recursive AST Generator":
             generator = ASTGenerator(p_fields, max_depth=req.ast_depth)
-            candidates = generator.generate(req.count)
+            texts = generator.generate(req.count)
+            candidates_with_meta = [(t, None, None, None) for t in texts]
+            
         elif req.engine == "Mutation Engine":
-            # Load top formulas to mutate
+            # Load parent Expression objects instead of raw strings to carry parent id & lineage id
             result = await db.execute(
-                select(Expression.expression_text)
+                select(Expression)
                 .where(Expression.project_id == req.project_id)
+                .where(Expression.status.in_(["PASSED", "REJECTED"]))
                 .limit(20)
             )
-            parents = [r[0] for r in result.all()]
+            parents = result.scalars().all()
+            
             generator = MutationGenerator(p_fields)
-            candidates = generator.generate(req.count, base_formulas=parents)
+            
+            # If parents are available, mutate them
+            if parents:
+                import random
+                attempts = 0
+                max_attempts = req.count * 20
+                while len(candidates_with_meta) < req.count and attempts < max_attempts:
+                    attempts += 1
+                    parent = random.choice(parents)
+                    child_text = generator.mutate_expression(parent.expression_text)
+                    if child_text and child_text != parent.expression_text and child_text not in [c[0] for c in candidates_with_meta]:
+                        ok, _ = FormulaValidator.validate(child_text, p_fields)
+                        if ok:
+                            candidates_with_meta.append((child_text, parent, parent.research_family, parent.hypothesis))
+            else:
+                # Fallback to templates if no parent expressions exist yet
+                from brain_farm.app.generators.template import TemplateGenerator
+                tg = TemplateGenerator(p_fields)
+                texts = tg.generate(req.count)
+                candidates_with_meta = [(t, None, None, None) for t in texts]
+                
         elif req.engine == "Genetic Crossover Engine":
-            # Fetch formulas with metrics
+            # Fetch expressions with their metrics
             result = await db.execute(
-                select(Expression.expression_text, Metric.sharpe)
-                .join(Simulation)
-                .join(Metric)
+                select(Expression, Metric.sharpe)
+                .join(Simulation, Expression.id == Simulation.expression_id)
+                .join(Metric, Simulation.id == Metric.simulation_id)
                 .where(Expression.project_id == req.project_id)
             )
             pool = [(r[0], r[1]) for r in result.all()]
+            
             generator = GeneticGenerator(p_fields)
-            candidates = generator.generate(req.count, population_history=pool)
+            
+            if len(pool) >= 4:
+                import random
+                pop_with_fitness = [(item[0].expression_text, item[1]) for item in pool]
+                expr_map = {item[0].expression_text: item[0] for item in pool}
+                
+                attempts = 0
+                max_attempts = req.count * 20
+                while len(candidates_with_meta) < req.count and attempts < max_attempts:
+                    attempts += 1
+                    p1_text, p2_text = generator.select_parents(pop_with_fitness)
+                    c1, c2 = generator.crossover(p1_text, p2_text)
+                    
+                    if random.random() < 0.3:
+                        c1 = generator.mutator.mutate_expression(c1)
+                    if random.random() < 0.3:
+                        c2 = generator.mutator.mutate_expression(c2)
+                        
+                    for child in [c1, c2]:
+                        if child and child not in [c[0] for c in candidates_with_meta] and child not in expr_map:
+                            ok, _ = FormulaValidator.validate(child, p_fields)
+                            if ok:
+                                parent_obj = expr_map[p1_text]
+                                candidates_with_meta.append((child, parent_obj, parent_obj.research_family, parent_obj.hypothesis))
+            
+            if len(candidates_with_meta) < req.count:
+                # Add template fallbacks
+                from brain_farm.app.generators.template import TemplateGenerator
+                tg = TemplateGenerator(p_fields)
+                texts = tg.generate(req.count - len(candidates_with_meta))
+                for t in texts:
+                    candidates_with_meta.append((t, None, None, None))
+                    
         elif req.engine == "LLM-AI Optimizer":
             generator = LLMGenerator(p_fields)
-            candidates = generator.generate(req.count)
+            texts = generator.generate(req.count)
+            candidates_with_meta = [(t, None, None, None) for t in texts]
         else:
             raise HTTPException(status_code=400, detail="Invalid generator engine.")
             
         # Insert Expressions to DB as PENDING
-        for text in candidates:
+        created_exprs = []
+        for text, parent_obj, family_name, hypothesis_text in candidates_with_meta:
             expr_db = Expression(
                 project_id=req.project_id,
                 expression_text=text,
                 generator_type=req.engine.split()[0],
-                status="PENDING"
+                status="PENDING",
+                complexity_score=calculate_complexity_score(text),
+                research_family=family_name,
+                hypothesis=hypothesis_text,
+                parent_id=parent_obj.id if parent_obj else None
             )
-            db.add(expr_db)
+            if parent_obj:
+                expr_db.lineage_id = parent_obj.lineage_id if parent_obj.lineage_id else parent_obj.id
             
+            db.add(expr_db)
+            created_exprs.append(expr_db)
+            
+        await db.flush()
+        
+        # Set lineage_id = id for root expressions (where lineage_id is None)
+        for expr_db in created_exprs:
+            if expr_db.lineage_id is None:
+                expr_db.lineage_id = expr_db.id
+                
         await db.commit()
-        return {"success": True, "queued_count": len(candidates)}
+        return {"success": True, "queued_count": len(candidates_with_meta)}
 
 @app.post("/api/farm/submit-single")
 async def submit_single(request: Request, req: SingleSubmissionRequest):
@@ -585,9 +711,12 @@ async def submit_single(request: Request, req: SingleSubmissionRequest):
             project_id=req.project_id,
             expression_text=req.expression,
             generator_type="MANUAL",
-            status="PENDING"
+            status="PENDING",
+            complexity_score=calculate_complexity_score(req.expression)
         )
         db.add(expr)
+        await db.flush()
+        expr.lineage_id = expr.id
         await db.commit()
         return {"success": True, "message": "Enqueued manually submitted expression."}
 

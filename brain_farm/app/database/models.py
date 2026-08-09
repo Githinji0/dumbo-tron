@@ -62,6 +62,14 @@ class Expression(Base):
     status: Mapped[str] = mapped_column(String(50), default="PENDING")  # PENDING, SIMULATING, PASSED, REJECTED, ERROR
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     parent_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("expressions.id"), nullable=True)  # For mutations/GA/LLM track origin
+    
+    # Research Memory Schema additions
+    research_family: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    hypothesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    lineage_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    complexity_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    parameter_sensitivity: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    regime_performance: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     project: Mapped["Project"] = relationship("Project", back_populates="expressions")
     simulations: Mapped[List["Simulation"]] = relationship("Simulation", back_populates="expression", cascade="all, delete-orphan")
@@ -102,6 +110,18 @@ class Metric(Base):
     sub_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     long_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     short_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Statistical validation metrics additions
+    rank_ic: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    mean_ic: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    median_ic: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    ic_std_dev: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    ic_ir: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    positive_ic_ratio: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    walk_forward_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    regime_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    correlation_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    composite_research_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
