@@ -220,6 +220,10 @@ class SimulationWorker:
                 if not sim or sim.status != "QUEUED":
                     return
 
+                # Transition immediately to SUBMITTING to prevent other tasks from picking it up
+                sim.status = "SUBMITTING"
+                await db.commit()
+
                 expr = sim.expression
                 proj = expr.project
                 
@@ -249,6 +253,15 @@ class SimulationWorker:
                         backoff = int(err.split(":")[-1])
                         logger.warning(f"Submission rate-limited. Backing off for {backoff} seconds.")
                         await asyncio.sleep(backoff)
+                        
+                        # Re-open session to transition back to QUEUED
+                        async with AsyncSessionLocal() as db2:
+                            await db2.execute(
+                                update(Simulation)
+                                .where(Simulation.id == sim_id)
+                                .values(status="QUEUED")
+                            )
+                            await db2.commit()
                     elif "re-authenticate" in err.lower() or "session expired" in err.lower():
                         # Session died mid-flight — hold sim for retry, evict stale client
                         sim.status = "NEEDS_AUTH"
@@ -340,7 +353,10 @@ class SimulationWorker:
                 return
 
             status = data.get("status")
-            if status in ["COMPLETE", "OK"]:
+            TERMINAL_SUCCESS = {"COMPLETE", "OK", "DONE", "WARNING"}
+            TERMINAL_FAILURE = {"ERROR", "FAILED", "CANCELLED"}
+
+            if status in TERMINAL_SUCCESS:
                 # Simulation finished! Parse metrics
                 sim.status = "COMPLETE"
                 sim.brain_alpha_id = data.get("alpha")
@@ -466,26 +482,54 @@ class SimulationWorker:
                     # Spawn optimization task in the background
                     asyncio.create_task(self._optimize_rejected_alpha(proj.id, expr.id, msg))
                     
-            elif status == "ERROR":
+            elif status in TERMINAL_FAILURE:
                 sim.status = "ERROR"
-                sim.error_message = data.get("message", "Unknown simulation runtime error.")
+                sim.error_message = data.get("message", f"Simulation ended with status: {status}")
                 expr.status = "ERROR"
                 
                 log = ProjectLog(
                     project_id=proj.id,
                     level="ERROR",
-                    message=f"Simulation error for '{expr.expression_text[:30]}...': {sim.error_message}"
+                    message=f"Simulation {status} for '{expr.expression_text[:30]}...': {sim.error_message}"
                 )
                 db.add(log)
                 await db.commit()
                 
             else:
-                # Still RUNNING or QUEUED on target server, update timestamp
+                # Still RUNNING or QUEUED on the remote server — update timestamp
                 sim.updated_at = datetime.utcnow()
+
+                # Safety timeout: if a simulation has been polling for too long, abort it.
+                MAX_POLL_MINUTES = 60
+                poll_start = sim.started_at if hasattr(sim, "started_at") and sim.started_at else sim.updated_at
+                if poll_start:
+                    age_minutes = (datetime.utcnow() - poll_start).total_seconds() / 60
+                    if age_minutes > MAX_POLL_MINUTES:
+                        sim.status = "ERROR"
+                        sim.error_message = (
+                            f"Timed out after {int(age_minutes)}m with remote status: {status!r}"
+                        )
+                        expr.status = "ERROR"
+                        log = ProjectLog(
+                            project_id=proj.id,
+                            level="ERROR",
+                            message=(
+                                f"Simulation timed out ({int(age_minutes)}m) for "
+                                f"'{expr.expression_text[:30]}...' — last status: {status!r}"
+                            )
+                        )
+                        db.add(log)
+                        logger.warning(
+                            f"Sim {sim.id} timed out after {int(age_minutes)}m "
+                            f"(brain_id={sim.brain_simulation_id}, last status={status!r})"
+                        )
+
                 await db.commit()
 
     async def _optimize_rejected_alpha(self, project_id: int, expr_id: int, fail_reason: str):
         """Optimizes a failed expression and re-submits it into the queue."""
+        MAX_OPTIMIZER_DEPTH = 3  # Prevent infinite optimize → reject → optimize chains
+
         logger.info(f"Auto-optimizer: starting optimization for Expression ID={expr_id}")
         async with AsyncSessionLocal() as db:
             # Query expression and project criteria
@@ -498,6 +542,24 @@ class SimulationWorker:
             expr = result.scalar_one_or_none()
             if not expr:
                 return
+
+            # --- Depth guard: count ancestor chain length ---
+            depth = 0
+            parent_id = expr.parent_id
+            while parent_id is not None and depth < MAX_OPTIMIZER_DEPTH:
+                depth += 1
+                parent_res = await db.execute(
+                    select(Expression.parent_id).where(Expression.id == parent_id)
+                )
+                parent_id = parent_res.scalar_one_or_none()
+
+            if depth >= MAX_OPTIMIZER_DEPTH:
+                logger.info(
+                    f"Auto-optimizer: skipping expr {expr_id} — "
+                    f"max optimizer depth ({MAX_OPTIMIZER_DEPTH}) reached."
+                )
+                return
+            # -----------------------------------------------
 
             proj = expr.project
             

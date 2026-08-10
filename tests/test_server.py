@@ -207,4 +207,131 @@ def test_passed_alphas_endpoint_regression():
         assert "parameter_sensitivity" in item
         assert "regime_performance" in item
 
+def test_stop_simulations_and_logout_cancellation():
+    from brain_farm.app.database.models import Project, Expression, Simulation
+    from brain_farm.app.database.session import make_session_factory
+    import asyncio
+
+    AsyncSessionLocal = make_session_factory()
+
+    proj_id = None
+    sim_id = None
+    expr_id = None
+    sim2_id = None
+    expr2_id = None
+
+    async def _setup_active_sim(u_id):
+        async with AsyncSessionLocal() as db:
+            # Create a project and active simulation
+            proj = Project(
+                name="Stop Test Project",
+                region="USA",
+                universe="TOP3000",
+                neutralization="SUBINDUSTRY",
+                user_id=u_id
+            )
+            db.add(proj)
+            await db.flush()
+
+            expr = Expression(
+                project_id=proj.id,
+                expression_text="close / open",
+                status="SIMULATING",
+                generator_type="TEST"
+            )
+            db.add(expr)
+            await db.flush()
+
+            sim = Simulation(
+                expression_id=expr.id,
+                status="POLLING"
+            )
+            db.add(sim)
+            await db.commit()
+            return proj.id, sim.id, expr.id
+
+    # Authenticate first
+    login_payload = {
+        "email": "testuser@mock.com",
+        "password": "mockpassword",
+        "use_mock": True
+    }
+    login_resp = client.post("/api/auth/login", json=login_payload)
+    assert login_resp.status_code == 200
+    login_data = login_resp.json()
+    u_id = login_data["user_id"]
+    cookies = login_resp.cookies
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        proj_id, sim_id, expr_id = loop.run_until_complete(_setup_active_sim(u_id))
+
+        # 1. Trigger manual stop endpoint /api/queue/stop
+        stop_resp = client.post(f"/api/queue/stop?project_id={proj_id}", cookies=cookies)
+        assert stop_resp.status_code == 200
+        stop_data = stop_resp.json()
+        assert stop_data["success"] is True
+        assert stop_data["stopped_count"] == 1
+
+        # Verify simulation and expression have been cancelled
+        async def _verify_cancelled(s_id, e_id):
+            async with AsyncSessionLocal() as db:
+                s = await db.get(Simulation, s_id)
+                e = await db.get(Expression, e_id)
+                assert s.status == "ERROR"
+                assert "Cancelled" in s.error_message
+                assert e.status == "ERROR"
+
+        loop.run_until_complete(_verify_cancelled(sim_id, expr_id))
+
+        # 2. Re-create simulations and verify logout cancellation works
+        async def _setup_another_sim():
+            async with AsyncSessionLocal() as db:
+                expr2 = Expression(
+                    project_id=proj_id,
+                    expression_text="close - open",
+                    status="SIMULATING",
+                    generator_type="TEST"
+                )
+                db.add(expr2)
+                await db.flush()
+
+                sim2 = Simulation(
+                    expression_id=expr2.id,
+                    status="POLLING"
+                )
+                db.add(sim2)
+                await db.commit()
+                return sim2.id, expr2.id
+
+        sim2_id, expr2_id = loop.run_until_complete(_setup_another_sim())
+
+        # Logout
+        logout_resp = client.post("/api/auth/logout", cookies=cookies)
+        assert logout_resp.status_code == 200
+
+        # Verify that the simulation was stopped automatically on logout
+        loop.run_until_complete(_verify_cancelled(sim2_id, expr2_id))
+
+    finally:
+        # Clean up database test entries
+        async def _cleanup():
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import delete
+                # Delete references
+                ids_del = [sid for sid in [sim_id, sim2_id] if sid is not None]
+                if ids_del:
+                    await db.execute(delete(Simulation).where(Simulation.id.in_(ids_del)))
+                exprs_del = [eid for eid in [expr_id, expr2_id] if eid is not None]
+                if exprs_del:
+                    await db.execute(delete(Expression).where(Expression.id.in_(exprs_del)))
+                if proj_id is not None:
+                    await db.execute(delete(Project).where(Project.id == proj_id))
+                await db.commit()
+
+        loop.run_until_complete(_cleanup())
+        loop.close()
+
+
 

@@ -211,6 +211,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Sync Fields catalog
     document.getElementById("btnSyncFieldsCatalog").addEventListener("click", handleFieldsSync);
 
+    // Cancel simulations
+    document.getElementById("btnCancelAllSimulations").addEventListener("click", handleCancelAllSimulations);
+
     // Engine Selection Change wrapper
     document.getElementById("farmEngineSelect").addEventListener("change", (e) => {
       const depthWrapper = document.getElementById("astDepthWrapper");
@@ -536,8 +539,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const starTd = document.createElement("td");
       starTd.className = "text-center";
+      starTd.style.cursor = "pointer";
       starTd.innerHTML = `<i data-lucide="star" class="fav-star ${f.is_favorite ? 'active' : ''}"></i>`;
-      starTd.querySelector("i").addEventListener("click", () => handleFieldFavoriteToggle(f.id));
+      starTd.addEventListener("click", () => handleFieldFavoriteToggle(f.id));
 
       const codeTd = document.createElement("td");
       codeTd.innerHTML = `<code>${f.id}</code>`;
@@ -564,7 +568,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const list = window.cachedFields || [];
     const filtered = list.filter(f => {
-      const matchesQuery = f.id.toLowerCase().includes(query) || f.name.toLowerCase().includes(query) || f.category.toLowerCase().includes(query);
+      const matchesQuery =
+        (f.id || "").toLowerCase().includes(query) ||
+        (f.name || "").toLowerCase().includes(query) ||
+        (f.category || "").toLowerCase().includes(query);
       const matchesFav = !favOnly || f.is_favorite;
       return matchesQuery && matchesFav;
     });
@@ -716,6 +723,30 @@ document.addEventListener("DOMContentLoaded", () => {
     if (logPollIntervalId) {
       clearInterval(logPollIntervalId);
       logPollIntervalId = null;
+    }
+  }
+
+  async function handleCancelAllSimulations() {
+    if (!activeProjectId) return;
+    if (!confirm("Are you sure you want to stop all active simulations for this project?")) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/queue/stop?project_id=${activeProjectId}`, {
+        method: "POST",
+        headers: getHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Stopped ${data.stopped_count} active simulations.`);
+        loadQueueData();
+      } else {
+        const data = await res.json();
+        alert("Failed to stop simulations: " + (data.detail || "Unknown error"));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error: " + err.message);
     }
   }
 

@@ -118,6 +118,12 @@ class FieldManager:
     @staticmethod
     async def search_fields(db: AsyncSession, query: str, favorite_only: bool = False) -> List[DataFieldCache]:
         """Search and filter cached fields."""
+        # Ensure database is seeded with defaults if cache is empty
+        result_check = await db.execute(select(DataFieldCache).limit(1))
+        if not result_check.scalar_one_or_none():
+            logger.info("Database cache is empty during search. Seeding defaults.")
+            await FieldManager.seed_default_fields(db)
+
         stmt = select(DataFieldCache)
         if favorite_only:
             stmt = stmt.where(DataFieldCache.is_favorite == True)

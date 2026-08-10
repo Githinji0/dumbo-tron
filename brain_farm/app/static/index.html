@@ -382,7 +382,12 @@
 
             <!-- Active Grid Table -->
             <div class="card" style="margin-top: 25px;">
-              <h3>Active Simulation Status (Real-time polling)</h3>
+              <div class="card-header-flex">
+                <h3>Active Simulation Status (Real-time polling)</h3>
+                <button class="btn btn-secondary btn-sm" id="btnCancelAllSimulations"
+                  style="background: var(--error); border-color: var(--error); color: white;"><i
+                    data-lucide="square"></i> Stop Simulations</button>
+              </div>
               <div class="table-container">
                 <table class="grid-table" id="queueSimulationsTable">
                   <thead>
@@ -490,7 +495,8 @@
           </div>
 
           <div id="passedContentWrapper">
-            <div class="grid-2col" style="grid-template-columns: 1.2fr 0.8fr; margin-bottom: 25px;">
+            <div class="grid-2col"
+              style="grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); margin-bottom: 25px;">
               <!-- Table listing -->
               <div class="card">
                 <h3>Qualified Passed Candidate Alphas</h3>

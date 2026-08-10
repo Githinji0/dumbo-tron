@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field as PydanticField
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload
 
 from brain_farm.app.database.session import make_session_factory, init_db
@@ -273,6 +273,25 @@ async def finalize_user_login(email: str, password: str, use_mock: bool, client:
 @app.post("/api/auth/logout")
 async def auth_logout(request: Request, response: Response):
     user_id = await get_current_user_id(request)
+    
+    # Cancel all active user simulations
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(Simulation)
+            .join(Expression)
+            .join(Project)
+            .options(selectinload(Simulation.expression))
+            .where(Project.user_id == user_id)
+            .where(Simulation.status.in_(["QUEUED", "SUBMITTING", "POLLING", "NEEDS_AUTH"]))
+        )
+        result = await db.execute(stmt)
+        sims = result.scalars().all()
+        for sim in sims:
+            sim.status = "ERROR"
+            sim.error_message = "Cancelled manually by user (Session Logout)"
+            sim.expression.status = "ERROR"
+        await db.commit()
+
     session = active_sessions.pop(user_id, None)
     if session and session["client"] and session["client"].client:
         try:
@@ -853,11 +872,18 @@ async def get_queue_stats(project_id: int):
         )
         pending_cnt = len(res_pending.scalars().all())
         
-        # Simulating active
+        # Count truly in-flight simulations from the Simulation table (QUEUED or POLLING).
+        # Using Expression.status == "SIMULATING" is unreliable — it can get stuck
+        # when a submission fails mid-flight (rate-limit, auth error, etc.).
         res_active = await db.execute(
-            select(Expression).where(Expression.project_id == project_id, Expression.status == "SIMULATING")
+            select(func.count()).select_from(Simulation)
+            .join(Expression, Simulation.expression_id == Expression.id)
+            .where(
+                Expression.project_id == project_id,
+                Simulation.status.in_(["QUEUED", "SUBMITTING", "POLLING"])
+            )
         )
-        active_cnt = len(res_active.scalars().all())
+        active_cnt = res_active.scalar() or 0
         
         # Details grid
         result_sims = await db.execute(
@@ -910,6 +936,36 @@ async def get_logs(project_id: int):
             }
             for log in result.all()
         ]
+
+@app.post("/api/queue/stop")
+async def stop_simulations(request: Request, project_id: int):
+    user_id = await get_current_user_id(request)
+    session = active_sessions.get(user_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Active auth context missing.")
+
+    async with AsyncSessionLocal() as db:
+        proj_res = await db.execute(
+            select(Project).where(Project.id == project_id, Project.user_id == user_id)
+        )
+        if not proj_res.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Project not found or access denied.")
+
+        stmt = (
+            select(Simulation)
+            .join(Expression)
+            .options(selectinload(Simulation.expression))
+            .where(Expression.project_id == project_id)
+            .where(Simulation.status.in_(["QUEUED", "SUBMITTING", "POLLING", "NEEDS_AUTH"]))
+        )
+        result = await db.execute(stmt)
+        sims = result.scalars().all()
+        for sim in sims:
+            sim.status = "ERROR"
+            sim.error_message = "Cancelled manually by user"
+            sim.expression.status = "ERROR"
+        await db.commit()
+        return {"success": True, "stopped_count": len(sims)}
 
 @app.get("/api/analytics")
 async def get_analytics(project_id: int):

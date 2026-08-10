@@ -59,6 +59,8 @@ class WeightedCompositeScorer:
         Linear decay: simplicity decreases as complexity increases.
         Complexity of 1.0 yields 1.0 simplicity. Complexity >= 20.0 yields 0.05 simplicity.
         """
+        if complexity_score is None:
+            complexity_score = 3.0
         score = 1.0 - (complexity_score - 1.0) / 19.0
         return float(max(0.05, min(1.0, score)))
 
