@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field as PydanticField
 
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, update
 from sqlalchemy.orm import selectinload
 
 from brain_farm.app.database.session import make_session_factory, init_db
@@ -988,14 +988,23 @@ async def get_queue_stats(project_id: int):
         }
 
 @app.get("/api/logs")
-async def get_logs(project_id: int):
+async def get_logs(
+    project_id: int,
+    limit: int = 100,
+    level: Optional[str] = None,
+    search: Optional[str] = None
+):
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message)
-            .where(ProjectLog.project_id == project_id)
-            .order_by(desc(ProjectLog.created_at))
-            .limit(40)
+        query = select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message).where(
+            ProjectLog.project_id == project_id
         )
+        if level and level.strip() and level.upper() != "ALL":
+            query = query.where(ProjectLog.level == level.strip().upper())
+        if search and search.strip():
+            query = query.where(ProjectLog.message.ilike(f"%{search.strip()}%"))
+        
+        query = query.order_by(desc(ProjectLog.created_at)).limit(limit)
+        result = await db.execute(query)
         return [
             {
                 "timestamp": log[0].strftime("%Y-%m-%d %H:%M:%S"),
@@ -1004,6 +1013,221 @@ async def get_logs(project_id: int):
             }
             for log in result.all()
         ]
+
+@app.get("/api/logs/report")
+async def get_logs_report(project_id: int):
+    async with AsyncSessionLocal() as db:
+        proj_res = await db.execute(select(Project).where(Project.id == project_id))
+        proj = proj_res.scalar_one_or_none()
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        res = await db.execute(
+            select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message)
+            .where(ProjectLog.project_id == project_id)
+            .order_by(desc(ProjectLog.created_at))
+            .limit(1000)
+        )
+        logs = res.all()
+
+        total_logs = len(logs)
+        success_count = sum(1 for l in logs if l[1] == "SUCCESS")
+        info_count = sum(1 for l in logs if l[1] == "INFO")
+        warning_count = sum(1 for l in logs if l[1] == "WARNING")
+        error_count = sum(1 for l in logs if l[1] == "ERROR")
+
+        pre_screen_count = 0
+        duplicate_count = 0
+        correlation_count = 0
+        metric_rejections = 0
+        
+        sharpe_failures = 0
+        fitness_failures = 0
+        turnover_failures = 0
+        margin_failures = 0
+        sub_universe_failures = 0
+        sim_errors = 0
+        
+        for log in logs:
+            msg = log[2]
+            if "Pre-Screen Filter" in msg:
+                pre_screen_count += 1
+            elif "Duplicate Checker" in msg:
+                duplicate_count += 1
+            elif "Correlation Filter" in msg:
+                correlation_count += 1
+            elif "Alpha Rejected" in msg:
+                metric_rejections += 1
+                if "Sharpe" in msg and "FAIL" in msg:
+                    sharpe_failures += 1
+                if "Fitness" in msg and "FAIL" in msg:
+                    fitness_failures += 1
+                if "Turnover" in msg and "FAIL" in msg:
+                    turnover_failures += 1
+                if "Margin" in msg and "FAIL" in msg:
+                    margin_failures += 1
+                if "Sub-Universe Sharpe" in msg and "FAIL" in msg:
+                    sub_universe_failures += 1
+            elif "Simulation ERROR" in msg:
+                sim_errors += 1
+
+        advice_items = []
+        if sharpe_failures > 0:
+            advice_items.append(
+                f"- **Sharpe Ratio ({sharpe_failures} occurrences)**: Recommending cross-sectional beta neutralization. "
+                "Apply `group_neutralize(alpha, subindustry)` or rank-transform `rank(alpha)` to decouple the signal from broad index movements."
+            )
+        if fitness_failures > 0:
+            advice_items.append(
+                f"- **Fitness Score ({fitness_failures} occurrences)**: Recommend improving the signal-to-turnover ratio. "
+                "Introduce volume decay or transaction-cost inhibitors to scale down weight changes on high-frequency noise."
+            )
+        if turnover_failures > 0:
+            advice_items.append(
+                f"- **Turnover ({turnover_failures} occurrences)**: Recommend slowing down alpha transitions. "
+                "Use linear decay functions like `ts_decay_linear(alpha, 10)` or increase lookback lengths to stabilize positions."
+            )
+        if margin_failures > 0:
+            advice_items.append(
+                f"- **Margin ({margin_failures} occurrences)**: Margin requirements failed. Try scaling alpha weights "
+                "proportionately to stock spreads, focusing on less liquid assets, or neutralizing by industry code."
+            )
+        if sub_universe_failures > 0:
+            advice_items.append(
+                f"- **Sub-Universe Sharpe ({sub_universe_failures} occurrences)**: Alpha is unstable/non-robust across subsegments. "
+                "Verify neutralization layers or evaluate rank constraints to prevent single subindustries from driving all risk."
+            )
+        if duplicate_count > 10:
+            advice_items.append(
+                f"- **Duplicate Expressions ({duplicate_count} occurrences)**: A high duplicate rate indicates template saturation. "
+                "Switch dynamic template parameters, use different operators (e.g. ts_std_dev, ts_product), or expand search depth boundary."
+            )
+        if correlation_count > 10:
+            advice_items.append(
+                f"- **Redundant Expressions ({correlation_count} occurrences)**: Candidates are highly correlated with previously mined alphas. "
+                "Introduce factor neutralization against the existing passed alpha portfolio, or pick divergent dataset indicators."
+            )
+        if sim_errors > 0:
+            advice_items.append(
+                f"- **Simulation Errors ({sim_errors} occurrences)**: Ensure all catalog fields are spelled correctly, "
+                "check parenthesis balance, and confirm that mathematical functions receive valid arguments (like non-zero lookbacks)."
+            )
+
+        if not advice_items:
+            advice_items.append("- All parameters are in target ranges. If farming yield is low, consider relaxing the project threshold targets slightly.")
+
+        advice_str = "\n".join(advice_items)
+
+        markdown_report = f"""# Alpha Farm Diagnostics Report
+
+**Project Profile**: {proj.name}
+- Region: {proj.region}
+- Universe: {proj.universe}
+- Target Sharpe: >= {proj.min_sharpe:.2f}
+- Target Fitness: >= {proj.min_fitness:.2f}
+- Max Turnover: <= {proj.max_turnover:.2%}
+- Min Margin: >= {proj.min_margin:.2f} bps
+- Min Sub-Universe Sharpe: >= {proj.min_sub_universe_sharpe:.2f}
+
+## Diagnostic Statistics (Last {total_logs} logs)
+- **Total Logs**: {total_logs}
+- **Successes (Passed Candidates)**: {success_count}
+- **Warnings (Rejections)**: {warning_count}
+- **Errors**: {error_count}
+- **Info capture**: {info_count}
+
+### Rejection Breakdown
+- Pre-Screen Filter Rejections: {pre_screen_count}
+- Duplicate Rejections: {duplicate_count}
+- Correlation Rejections: {correlation_count}
+- Metric Rejections: {metric_rejections}
+  - Sharpe Failures: {sharpe_failures}
+  - Fitness Failures: {fitness_failures}
+  - Turnover Failures: {turnover_failures}
+  - Margin Failures: {margin_failures}
+  - Sub-Universe Sharpe Failures: {sub_universe_failures}
+- Remote Simulation Failures/Errors: {sim_errors}
+
+## Strategic Recommendations
+Based on recent backtest failures, here are the most effective improvements:
+{advice_str}
+"""
+        return {"report": markdown_report}
+
+@app.get("/api/logs/export")
+async def export_logs(
+    project_id: int,
+    format: str = "csv",
+    level: Optional[str] = None,
+    search: Optional[str] = None
+):
+    import io
+    import csv
+    async with AsyncSessionLocal() as db:
+        query = select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message).where(
+            ProjectLog.project_id == project_id
+        )
+        if level and level.strip() and level.upper() != "ALL":
+            query = query.where(ProjectLog.level == level.strip().upper())
+        if search and search.strip():
+            query = query.where(ProjectLog.message.ilike(f"%{search.strip()}%"))
+        
+        query = query.order_by(desc(ProjectLog.created_at)).limit(2000)
+        result = await db.execute(query)
+        logs = result.all()
+
+        filename_prefix = f"alpha_farm_project_{project_id}"
+
+        if format.lower() == "csv":
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["Timestamp", "Level", "Message"])
+            for log in logs:
+                writer.writerow([
+                    log[0].strftime("%Y-%m-%d %H:%M:%S"),
+                    log[1],
+                    log[2]
+                ])
+            content = output.getvalue()
+            output.close()
+            return Response(
+                content=content,
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename_prefix}_logs.csv"
+                }
+            )
+        elif format.lower() == "md":
+            lines = [f"# Alpha Farm Logs - Project {project_id}\n"]
+            for log in logs:
+                timestamp = log[0].strftime("%Y-%m-%d %H:%M:%S")
+                level_str = log[1]
+                msg = log[2].replace("\n", "  \n  ")
+                lines.append(f"- **[{timestamp}]** `[{level_str}]`:\n  {msg}\n")
+            
+            content = "\n".join(lines)
+            return Response(
+                content=content,
+                media_type="text/markdown",
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename_prefix}_logs.md"
+                }
+            )
+        else:
+            lines = []
+            for log in logs:
+                timestamp = log[0].strftime("%Y-%m-%d %H:%M:%S")
+                level_str = log[1]
+                msg = log[2]
+                lines.append(f"[{timestamp}] [{level_str}] {msg}")
+            content = "\n".join(lines)
+            return Response(
+                content=content,
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename_prefix}_logs.txt"
+                }
+            )
 
 @app.post("/api/queue/stop")
 async def stop_simulations(request: Request, project_id: int):

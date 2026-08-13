@@ -66,12 +66,25 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (viewId === "live-queue") {
       startQueuePolling();
       stopAnalyticsPolling();
+      stopLogsTabPolling();
     } else if (viewId === "analytics") {
       stopQueuePolling();
       startAnalyticsPolling();
+      stopLogsTabPolling();
+    } else if (viewId === "project-logs-tab") {
+      stopQueuePolling();
+      stopAnalyticsPolling();
+      updateLogsViewWarnings();
+      startLogsTabPolling();
+    } else if (viewId === "ai-assistant") {
+      stopQueuePolling();
+      stopAnalyticsPolling();
+      stopLogsTabPolling();
+      loadAiConfig();
     } else {
       stopQueuePolling();
       stopAnalyticsPolling();
+      stopLogsTabPolling();
     }
 
     if (viewId === "passed-results") {
@@ -236,10 +249,72 @@ document.addEventListener("DOMContentLoaded", () => {
     // Manual Alpha Submit
     document.getElementById("btnSubmitManualExpression").addEventListener("click", handleManualSubmit);
 
-    // Refresh Logs manually inside Queue page
-    document.getElementById("btnRefreshLogsQueue").addEventListener("click", () => {
-      loadQueueLogs();
+    // Diagnostics tab action events
+    document.getElementById("btnRefreshDiagnostics").addEventListener("click", () => {
+      loadDiagnosticsLogs();
     });
+    document.getElementById("filterLogLevelSelect").addEventListener("change", () => {
+      loadDiagnosticsLogs();
+    });
+    document.getElementById("inputLogSearch").addEventListener("input", () => {
+      loadDiagnosticsLogs();
+    });
+    document.getElementById("selectLogLimit").addEventListener("change", () => {
+      loadDiagnosticsLogs();
+    });
+
+    // Report modal triggers
+    document.getElementById("btnGenerateReport").addEventListener("click", handleGenerateDiagnosticReport);
+
+    // Close report modal
+    const closeModal = () => {
+      document.getElementById("logsReportModal").style.display = "none";
+    };
+    document.getElementById("closeReportModal").addEventListener("click", closeModal);
+    document.getElementById("btnCloseReportBtn").addEventListener("click", closeModal);
+    document.getElementById("logsReportModal").addEventListener("click", (e) => {
+      if (e.target === document.getElementById("logsReportModal")) {
+        closeModal();
+      }
+    });
+
+    // Close log detail modal
+    const closeLogDetailModal = () => {
+      document.getElementById("logDetailModal").style.display = "none";
+    };
+    document.getElementById("closeLogDetailModal").addEventListener("click", closeLogDetailModal);
+    document.getElementById("btnCloseLogDetailBtn").addEventListener("click", closeLogDetailModal);
+    document.getElementById("logDetailModal").addEventListener("click", (e) => {
+      if (e.target === document.getElementById("logDetailModal")) {
+        closeLogDetailModal();
+      }
+    });
+
+    // Copy Formula inside detail modal
+    document.getElementById("btnCopyDetailFormula").addEventListener("click", (e) => {
+      const textToCopy = e.currentTarget._formulaText;
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy)
+          .then(() => {
+            const orgText = e.currentTarget.innerHTML;
+            e.currentTarget.innerHTML = '<i data-lucide="check"></i> Copied!';
+            lucide.createIcons();
+            setTimeout(() => {
+              e.currentTarget.innerHTML = orgText;
+              lucide.createIcons();
+            }, 2000);
+          })
+          .catch(err => {
+            console.error("Clipboard copy failed:", err);
+          });
+      }
+    });
+
+    // Export log buttons
+    document.getElementById("btnExportLogsCSV").addEventListener("click", () => handleExportLogs("csv"));
+    document.getElementById("btnExportLogsTXT").addEventListener("click", () => handleExportLogs("txt"));
+    document.getElementById("btnExportLogsMD").addEventListener("click", () => handleExportLogs("md"));
+    document.getElementById("btnDownloadReportMD").addEventListener("click", handleDownloadReportFile);
 
     // Export Result Files
     document.getElementById("btnExportCSV").addEventListener("click", () => downloadPassedFile("csv"));
@@ -252,6 +327,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // Submit Alpha to Registry
     document.getElementById("btnSubmitToRegistry").addEventListener("click", handleRegistrySubmission);
     document.getElementById("btnSubmitAllToRegistry").addEventListener("click", handleRegistrySubmissionAll);
+
+    // AI Assistant Handlers
+    document.getElementById("btnSaveAiKey").addEventListener("click", handleSaveAiConfig);
+    document.getElementById("btnClearAiChat").addEventListener("click", handleClearAiChat);
+    document.getElementById("btnSendAiMessage").addEventListener("click", handleSendAiMessage);
+    document.getElementById("aiProviderSelect").addEventListener("change", handleAiProviderChange);
   }
 
   async function handleSignIn() {
@@ -444,6 +525,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateQueueViewWarnings();
     updateAnalyticsViewWarnings();
     updatePassedViewWarnings();
+    updateLogsViewWarnings();
 
     if (!activeProjectId) {
       summaryBox.innerHTML = '<p class="placeholder-text">Please choose or create a project context.</p>';
@@ -508,6 +590,18 @@ document.addEventListener("DOMContentLoaded", () => {
   function updatePassedViewWarnings() {
     const warning = document.getElementById("passedProjectWarning");
     const container = document.getElementById("passedContentWrapper");
+    if (!currentUser.authenticated || !activeProjectId) {
+      if (warning) warning.style.display = "flex";
+      if (container) container.style.display = "none";
+    } else {
+      if (warning) warning.style.display = "none";
+      if (container) container.style.display = "block";
+    }
+  }
+
+  function updateLogsViewWarnings() {
+    const warning = document.getElementById("logsProjectWarning");
+    const container = document.getElementById("logsContentWrapper");
     if (!currentUser.authenticated || !activeProjectId) {
       if (warning) warning.style.display = "flex";
       if (container) container.style.display = "none";
@@ -713,10 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function startQueuePolling() {
     stopQueuePolling();
     loadQueueData();
-    loadQueueLogs();
-
     pollIntervalId = setInterval(loadQueueData, 2000);
-    logPollIntervalId = setInterval(loadQueueLogs, 4000);
   }
 
   function stopQueuePolling() {
@@ -724,9 +815,20 @@ document.addEventListener("DOMContentLoaded", () => {
       clearInterval(pollIntervalId);
       pollIntervalId = null;
     }
-    if (logPollIntervalId) {
-      clearInterval(logPollIntervalId);
-      logPollIntervalId = null;
+  }
+
+  let logsTabPollingId = null;
+
+  function startLogsTabPolling() {
+    stopLogsTabPolling();
+    loadDiagnosticsLogs();
+    logsTabPollingId = setInterval(loadDiagnosticsLogs, 5000);
+  }
+
+  function stopLogsTabPolling() {
+    if (logsTabPollingId) {
+      clearInterval(logsTabPollingId);
+      logsTabPollingId = null;
     }
   }
 
@@ -829,29 +931,341 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function loadQueueLogs() {
+  // --- Virtual scroll state ---
+  let _vsLogs = [];        // full data array
+  const ROW_HEIGHT = 72;   // estimated px per log row
+  const VS_BUFFER = 5;    // extra rows to render above/below viewport
+  let _vsRafPending = false;
+
+  function vsSetup() {
+    const viewport = document.getElementById("logsFeedViewport");
+    if (!viewport) return;
+
+    // Max height: fill remaining page up to 80vh
+    viewport.style.maxHeight = "80vh";
+    viewport.style.minHeight = "120px";
+
+    viewport.addEventListener("scroll", vsOnScroll, { passive: true });
+
+    // Keep layout correct when window resizes
+    if (window._vsResizeObs) window._vsResizeObs.disconnect();
+    window._vsResizeObs = new ResizeObserver(() => vsRender());
+    window._vsResizeObs.observe(viewport);
+  }
+
+  function vsOnScroll() {
+    if (_vsRafPending) return;
+    _vsRafPending = true;
+    requestAnimationFrame(() => {
+      _vsRafPending = false;
+      vsRender();
+    });
+  }
+
+  function vsRender() {
+    const viewport = document.getElementById("logsFeedViewport");
+    const list = document.getElementById("logsFeedList");
+    const spacer = document.getElementById("logsFeedSpacer");
+    if (!viewport || !list || !spacer) return;
+
+    const totalRows = _vsLogs.length;
+    const totalHeight = totalRows * ROW_HEIGHT;
+
+    // Spacer controls scrollbar range
+    spacer.style.height = totalHeight + "px";
+
+    const scrollTop = viewport.scrollTop;
+    const vpHeight = viewport.clientHeight;
+    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - VS_BUFFER);
+    const endIdx = Math.min(totalRows, Math.ceil((scrollTop + vpHeight) / ROW_HEIGHT) + VS_BUFFER);
+
+    list.innerHTML = "";
+    list.style.transform = `translateY(${startIdx * ROW_HEIGHT}px)`;
+
+    for (let i = startIdx; i < endIdx; i++) {
+      const log = _vsLogs[i];
+      const div = document.createElement("div");
+      div.className = `log-line ${log.level}`;
+      div.style.height = ROW_HEIGHT + "px";
+      const formattedMsg = log.message.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
+      div.innerHTML = `<span>[${log.timestamp}]</span> ${formattedMsg}`;
+      div.addEventListener("click", () => showLogDetail(log));
+      list.appendChild(div);
+    }
+  }
+
+  async function loadDiagnosticsLogs() {
     if (!activeProjectId) return;
     try {
-      const res = await fetch(`/api/logs?project_id=${activeProjectId}`);
+      const level = document.getElementById("filterLogLevelSelect").value;
+      const search = document.getElementById("inputLogSearch").value;
+      const limit = document.getElementById("selectLogLimit").value;
+
+      let url = `/api/logs?project_id=${activeProjectId}&limit=${limit}`;
+      if (level && level !== "ALL") url += `&level=${encodeURIComponent(level)}`;
+      if (search && search.trim() !== "") url += `&search=${encodeURIComponent(search.trim())}`;
+
+      const res = await fetch(url);
       const logs = await res.json();
 
-      const list = document.getElementById("miningFarmLogsList");
-      list.innerHTML = "";
+      const viewport = document.getElementById("logsFeedViewport");
+      const list = document.getElementById("logsFeedList");
+      if (!viewport || !list) return;
 
       if (logs.length === 0) {
-        list.innerHTML = '<p class="placeholder-text">No message logs captured yet for this project...</p>';
+        _vsLogs = [];
+        list.innerHTML = '<p class="placeholder-text">No message logs captured matching criteria...</p>';
+        document.getElementById("logsFeedSpacer").style.height = "0px";
         return;
       }
 
-      logs.forEach(log => {
-        const div = document.createElement("div");
-        div.className = `log-line ${log.level}`;
-        div.innerHTML = `<span>[${log.timestamp.split(" ")[1]}]</span> ${log.message}`;
-        list.appendChild(div);
-      });
+      _vsLogs = logs;
+      vsSetup();
+      viewport.scrollTop = 0;
+      vsRender();
     } catch (err) {
       console.error(err);
     }
+  }
+
+  function parseLogMessage(msg) {
+    const result = {
+      title: "Log Detail",
+      formula: "",
+      metrics: [],
+      advice: "",
+      rawHtml: ""
+    };
+
+    if (msg.includes("Alpha Mined Passed") || msg.includes("Mined Passed")) {
+      result.title = "Alpha Mined Passed Result";
+    } else if (msg.includes("Alpha Rejected") || msg.includes("Rejected")) {
+      result.title = "Alpha Mined Rejected Result";
+    } else if (msg.includes("Simulation ERROR")) {
+      result.title = "Simulation Error Diagnostic";
+    } else if (msg.includes("Pre-Screen Filter")) {
+      result.title = "Pre-Screen Logic Filtered";
+    } else if (msg.includes("Duplicate Checker")) {
+      result.title = "Duplicate Expression Filtered";
+    } else if (msg.includes("Correlation Filter")) {
+      result.title = "Correlation Filtered";
+    }
+
+    // Try parsing formula
+    const formulaMatch = msg.match(/Formula:\s*['"](.+?)['"]/s) || msg.match(/Formula:\s*(.+?)(\n|$)/s);
+    if (formulaMatch) {
+      result.formula = formulaMatch[1].trim();
+    }
+
+    // Try parsing metrics comparison
+    const metricLines = [...msg.matchAll(/-\s*([^:]+):\s*([^(]+?)\s*\(([^)]+?)\)\s*->\s*(PASS|FAIL)/g)];
+    if (metricLines.length > 0) {
+      metricLines.forEach(m => {
+        result.metrics.push({
+          name: m[1].trim(),
+          value: m[2].trim(),
+          expected: m[3].trim(),
+          status: m[4].trim()
+        });
+      });
+    } else {
+      const subUnivMatch = msg.match(/-\s*Sub-Universe Sharpe:\s*([^\s]+?)\s*\(Expected\s*([^)]+?)\)/);
+      if (subUnivMatch) {
+        const isPass = subUnivMatch[1].toUpperCase() === "PASS" || subUnivMatch[1].toUpperCase().includes("PASS");
+        result.metrics.push({
+          name: "Sub-Universe Sharpe",
+          value: subUnivMatch[1],
+          expected: subUnivMatch[2],
+          status: isPass ? "PASS" : "FAIL"
+        });
+      }
+    }
+
+    // Try parsing Advice
+    const adviceIndex = msg.indexOf("Advice:");
+    if (adviceIndex !== -1) {
+      result.advice = msg.substring(adviceIndex + 7).trim();
+    }
+
+    result.rawHtml = msg.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
+    return result;
+  }
+
+  function showLogDetail(log) {
+    try {
+      console.log("showLogDetail called for log:", log);
+      const parsed = parseLogMessage(log.message);
+
+      const tsElem = document.getElementById("logDetailTimestamp");
+      if (tsElem) tsElem.innerText = log.timestamp;
+
+      const levelBadge = document.getElementById("logDetailLevel");
+      if (levelBadge) {
+        levelBadge.innerText = log.level;
+        levelBadge.className = `status-pill ${log.level.toLowerCase()}`;
+      }
+
+      const titleElem = document.getElementById("logDetailTitle");
+      if (titleElem) {
+        titleElem.innerHTML = `<i data-lucide="info"></i> ${parsed.title}`;
+      }
+
+      const body = document.getElementById("logDetailBody");
+      if (body) {
+        body.innerHTML = "";
+
+        if (parsed.formula) {
+          const formCard = document.createElement("div");
+          formCard.innerHTML = `
+            <label><strong>Alpha Expression Formula:</strong></label>
+            <div style="background: var(--bg-primary); font-family: monospace; padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); color: var(--primary-accent); word-break: break-all; margin-top: 5px;">
+              ${parsed.formula}
+            </div>
+          `;
+          body.appendChild(formCard);
+
+          const copyBtn = document.getElementById("btnCopyDetailFormula");
+          if (copyBtn) {
+            copyBtn.style.display = "inline-flex";
+            copyBtn._formulaText = parsed.formula;
+          }
+        } else {
+          const copyBtn = document.getElementById("btnCopyDetailFormula");
+          if (copyBtn) copyBtn.style.display = "none";
+        }
+
+        if (parsed.metrics.length > 0) {
+          const tableCard = document.createElement("div");
+          tableCard.innerHTML = `
+            <label style="display:block; margin-bottom:6px;"><strong>Metrics Validation Check:</strong></label>
+            <table class="grid-table" style="min-width: 100%; border: 1px solid var(--border-color); border-radius: 6px;">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Observed</th>
+                  <th>Target Threshold</th>
+                  <th style="text-align: center;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="modalChecklistBody"></tbody>
+            </table>
+          `;
+          body.appendChild(tableCard);
+
+          const tbody = tableCard.querySelector("#modalChecklistBody");
+          parsed.metrics.forEach(m => {
+            const tr = document.createElement("tr");
+            const statusClass = m.status === "PASS" ? "complete" : "error";
+            tr.innerHTML = `
+              <td><strong>${m.name}</strong></td>
+              <td>${m.value}</td>
+              <td>${m.expected}</td>
+              <td style="text-align: center;"><span class="status-pill ${statusClass}">${m.status}</span></td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+
+        if (parsed.advice) {
+          const advCard = document.createElement("div");
+          const adviceUnits = parsed.advice.split("|").map(x => x.trim()).filter(Boolean);
+          let listItems = "";
+          adviceUnits.forEach(u => {
+            listItems += `<li style="margin-bottom: 8px;">${u}</li>`;
+          });
+
+          advCard.innerHTML = `
+            <div class="alert alert-warning" style="margin: 0; padding: 15px; border-left: 4px solid var(--warning); background-color: rgba(255, 215, 64, 0.05); border-color: rgba(255, 215, 64, 0.2);">
+              <div style="font-weight: 600; display:flex; align-items:center; gap:6px; margin-bottom:8px; color: var(--warning);">
+                <i data-lucide="lightbulb" style="width:16px; height:16px;"></i> Optimization Recommendations
+              </div>
+              <ul class="bullet-list-small" style="margin:0; padding-left: 20px;">
+                ${listItems}
+              </ul>
+            </div>
+          `;
+          body.appendChild(advCard);
+        }
+
+        if (!parsed.formula && parsed.metrics.length === 0 && !parsed.advice) {
+          const fallbackCard = document.createElement("div");
+          fallbackCard.innerHTML = `
+            <label><strong>Log Message Details:</strong></label>
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 15px; border-radius: 6px; font-family: monospace; white-space: pre-wrap; margin-top: 5px; line-height: 1.5;">
+              ${parsed.rawHtml}
+            </div>
+          `;
+          body.appendChild(fallbackCard);
+        }
+      }
+
+      const modal = document.getElementById("logDetailModal");
+      if (modal) {
+        modal.style.display = "flex";
+      }
+      if (window.lucide) {
+        lucide.createIcons();
+      }
+    } catch (e) {
+      console.error("Error displaying log detail:", e);
+      alert("Error displaying log detail: " + e.message);
+    }
+  }
+
+  let currentReportMarkdown = "";
+
+  async function handleGenerateDiagnosticReport() {
+    if (!activeProjectId) return;
+    const modal = document.getElementById("logsReportModal");
+    const body = document.getElementById("reportModalBody");
+
+    body.innerText = "Generating diagnostic report from latest logs...";
+    modal.style.display = "flex";
+
+    try {
+      const res = await fetch(`/api/logs/report?project_id=${activeProjectId}`);
+      const data = await res.json();
+      if (res.ok) {
+        currentReportMarkdown = data.report;
+        body.innerText = data.report;
+      } else {
+        body.innerText = "Error generating report: " + (data.detail || "Unknown error");
+      }
+    } catch (err) {
+      body.innerText = "Network error: " + err.message;
+    }
+  }
+
+  async function handleExportLogs(format) {
+    if (!activeProjectId) return;
+    const level = document.getElementById("filterLogLevelSelect").value;
+    const search = document.getElementById("inputLogSearch").value;
+
+    let url = `/api/logs/export?project_id=${activeProjectId}&format=${format}`;
+    if (level && level !== "ALL") {
+      url += `&level=${encodeURIComponent(level)}`;
+    }
+    if (search && search.trim() !== "") {
+      url += `&search=${encodeURIComponent(search.trim())}`;
+    }
+
+    window.open(url, "_blank");
+  }
+
+  function handleDownloadReportFile() {
+    if (!currentReportMarkdown) {
+      alert("Please generate a report first.");
+      return;
+    }
+    const blob = new Blob([currentReportMarkdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `project_${activeProjectId}_diagnostic_report.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // Analytics tab
@@ -863,20 +1277,45 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const emptyAlert = document.getElementById("analyticsEmptyAlert");
       const chartsGrid = document.getElementById("analyticsChartsGrid");
+      const kpiRow = document.getElementById("analyticsKpiRow");
+      const statsSection = document.getElementById("analyticsStatsSection");
 
       if (data.length === 0) {
         emptyAlert.style.display = "block";
         chartsGrid.style.display = "none";
+        if (kpiRow) kpiRow.style.display = "none";
+        if (statsSection) statsSection.style.display = "none";
         return;
       }
+
       emptyAlert.style.display = "none";
       chartsGrid.style.display = "grid";
+
+      // === KPI Row ===
+      if (kpiRow) {
+        const passed = data.filter(d => d.pareto_optimal || d.tier === 0);
+        const passRate = data.length > 0 ? ((passed.length / data.length) * 100).toFixed(1) : 0;
+        const bestSharpe = Math.max(...data.map(d => d.sharpe)).toFixed(3);
+        const avgSharpe = (data.reduce((s, d) => s + d.sharpe, 0) / data.length).toFixed(3);
+        const avgFitness = (data.reduce((s, d) => s + d.fitness, 0) / data.length).toFixed(3);
+        const avgTO = (data.reduce((s, d) => s + d.turnover, 0) / data.length).toFixed(1);
+
+        document.getElementById("kpiTotalSimulations").innerText = data.length;
+        document.getElementById("kpiPassRate").innerText = passRate + "%";
+        document.getElementById("kpiBestSharpe").innerText = bestSharpe;
+        document.getElementById("kpiAvgSharpe").innerText = avgSharpe;
+        document.getElementById("kpiAvgFitness").innerText = avgFitness;
+        document.getElementById("kpiAvgTurnover").innerText = avgTO + "%";
+        kpiRow.style.display = "grid";
+        if (window.lucide) lucide.createIcons();
+      }
 
       // Render Charts & Statistics values
       renderScatterChart(data);
       renderFitnessTurnoverChart(data);
       renderSharpeFitnessChart(data);
       renderAnalyticsAveragesTable(data);
+      if (statsSection) statsSection.style.display = "block";
 
       // Calculate mutual correlations if we have passed alphas
       loadAnalyticsMutualCorrelations();
@@ -1037,7 +1476,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderAnalyticsAveragesTable(items) {
     const stats = {};
     items.forEach(item => {
-      const key = item.generator;
+      const key = item.generator || "Standard";
       if (!stats[key]) {
         stats[key] = { count: 0, sharpe: 0, fitness: 0, turnover: 0, margin: 0 };
       }
@@ -1052,14 +1491,24 @@ document.addEventListener("DOMContentLoaded", () => {
     tbody.innerHTML = "";
 
     Object.keys(stats).forEach(engine => {
-      const summary = stats[engine];
+      const s = stats[engine];
+      const n = s.count;
+      const avgSharpe = (s.sharpe / n).toFixed(3);
+      const avgFitness = (s.fitness / n).toFixed(3);
+      const avgTO = (s.turnover / n).toFixed(2);
+      const avgMargin = (s.margin / n).toFixed(3);
+      // colour-code sharpe value
+      const sharpeVal = parseFloat(avgSharpe);
+      const sharpeColor = sharpeVal >= 1.5 ? "var(--primary-accent)" : sharpeVal >= 1.0 ? "var(--warning)" : "var(--error)";
+
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td style="font-weight:600">${engine}</td>
-        <td>${(summary.sharpe / summary.count).toFixed(3)}</td>
-        <td>${(summary.fitness / summary.count).toFixed(3)}</td>
-        <td>${(summary.turnover / summary.count).toFixed(2)}%</td>
-        <td>${(summary.margin / summary.count).toFixed(3)}</td>
+        <td>${n}</td>
+        <td style="color:${sharpeColor}; font-weight:600">${avgSharpe}</td>
+        <td>${avgFitness}</td>
+        <td>${avgTO}%</td>
+        <td>${avgMargin}</td>
       `;
       tbody.appendChild(tr);
     });
@@ -1509,5 +1958,222 @@ document.addEventListener("DOMContentLoaded", () => {
       feedback.innerText = `Network error: ${err.message}`;
       feedback.className = "alert alert-error";
     }
+  }
+
+  // === AI Assistant Implementation ===
+  let aiChatHistory = [];
+
+  function loadAiConfig() {
+    const provider = localStorage.getItem("dumbo_ai_provider") || "gemini";
+    const apiKey = localStorage.getItem("dumbo_ai_apikey") || "";
+    const model = localStorage.getItem("dumbo_ai_model") || (provider === "gemini" ? "gemini-1.5-flash" : "gpt-4o-mini");
+
+    document.getElementById("aiProviderSelect").value = provider;
+    document.getElementById("aiApiKeyInput").value = apiKey;
+    document.getElementById("aiModelInput").value = model;
+
+    // Load Chat History
+    const historyJson = localStorage.getItem("dumbo_ai_chat_history");
+    if (historyJson) {
+      try {
+        aiChatHistory = JSON.parse(historyJson);
+        renderAiChat();
+      } catch (err) {
+        aiChatHistory = [];
+      }
+    } else {
+      aiChatHistory = [];
+      renderAiChat();
+    }
+  }
+
+  function handleAiProviderChange(e) {
+    const provider = e.target.value;
+    const modelInput = document.getElementById("aiModelInput");
+    if (provider === "gemini") {
+      modelInput.placeholder = "e.g. gemini-1.5-flash";
+      if (!modelInput.value || modelInput.value.startsWith("gpt")) {
+        modelInput.value = "gemini-1.5-flash";
+      }
+    } else {
+      modelInput.placeholder = "e.g. gpt-4o-mini";
+      if (!modelInput.value || modelInput.value.startsWith("gemini")) {
+        modelInput.value = "gpt-4o-mini";
+      }
+    }
+  }
+
+  function handleSaveAiConfig() {
+    const provider = document.getElementById("aiProviderSelect").value;
+    const apiKey = document.getElementById("aiApiKeyInput").value.trim();
+    const model = document.getElementById("aiModelInput").value.trim();
+
+    localStorage.setItem("dumbo_ai_provider", provider);
+    localStorage.setItem("dumbo_ai_apikey", apiKey);
+    localStorage.setItem("dumbo_ai_model", model);
+
+    const badge = document.getElementById("aiSavedBadge");
+    badge.style.display = "block";
+    if (window.lucide) lucide.createIcons();
+    setTimeout(() => {
+      badge.style.display = "none";
+    }, 3000);
+  }
+
+  function handleClearAiChat() {
+    aiChatHistory = [];
+    localStorage.removeItem("dumbo_ai_chat_history");
+    renderAiChat();
+  }
+
+  function renderAiChat() {
+    const container = document.getElementById("aiChatWindow");
+    const placeholder = document.getElementById("aiChatPlaceholder");
+
+    // Clear messages
+    const msgDivs = container.querySelectorAll(".ai-msg-block");
+    msgDivs.forEach(div => div.remove());
+
+    if (aiChatHistory.length === 0) {
+      placeholder.style.display = "block";
+      return;
+    }
+
+    placeholder.style.display = "none";
+
+    aiChatHistory.forEach(msg => {
+      const msgBlock = document.createElement("div");
+      msgBlock.className = "ai-msg-block";
+      msgBlock.style.display = "flex";
+      msgBlock.style.flexDirection = "column";
+      msgBlock.style.gap = "4px";
+      msgBlock.style.alignSelf = msg.role === "user" ? "flex-end" : "flex-start";
+      msgBlock.style.maxWidth = "80%";
+
+      const header = document.createElement("span");
+      header.style.fontSize = "10px";
+      header.style.textTransform = "uppercase";
+      header.style.color = "var(--text-secondary)";
+      header.style.alignSelf = msg.role === "user" ? "flex-end" : "flex-start";
+      header.innerText = msg.role === "user" ? "You" : "Assistant";
+
+      const bubble = document.createElement("div");
+      bubble.style.padding = "10px 14px";
+      bubble.style.borderRadius = "8px";
+      bubble.style.whiteSpace = "pre-wrap";
+      bubble.style.wordBreak = "break-word";
+      bubble.style.lineHeight = "1.5";
+
+      if (msg.role === "user") {
+        bubble.style.background = "var(--primary-accent)";
+        bubble.style.color = "var(--bg-primary)";
+        bubble.style.fontWeight = "500";
+      } else {
+        bubble.style.background = "var(--bg-secondary)";
+        bubble.style.color = "var(--text-primary)";
+        bubble.style.border = "1px solid var(--border-color)";
+      }
+
+      bubble.innerText = msg.content;
+      msgBlock.appendChild(header);
+      msgBlock.appendChild(bubble);
+      container.appendChild(msgBlock);
+    });
+
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function handleSendAiMessage() {
+    const prompt = document.getElementById("aiMessageInput").value.trim();
+    if (!prompt) return;
+
+    const apiKey = localStorage.getItem("dumbo_ai_apikey");
+    if (!apiKey) {
+      showAiError("Missing API Key. Please save a valid API key configuration first.");
+      return;
+    }
+
+    const provider = localStorage.getItem("dumbo_ai_provider") || "gemini";
+    const model = localStorage.getItem("dumbo_ai_model") || (provider === "gemini" ? "gemini-1.5-flash" : "gpt-4o-mini");
+
+    hideAiError();
+
+    // 1. Add User Message
+    aiChatHistory.push({ role: "user", content: prompt });
+    document.getElementById("aiMessageInput").value = "";
+    renderAiChat();
+
+    // 2. Add Typing Indicator
+    const container = document.getElementById("aiChatWindow");
+    const indicatorBlock = document.createElement("div");
+    indicatorBlock.className = "ai-msg-block typing-indicator";
+    indicatorBlock.style.alignSelf = "flex-start";
+    indicatorBlock.innerHTML = `
+      <span style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary);">Assistant</span>
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 10px 14px; border-radius: 8px; color: var(--text-secondary); width: fit-content;">
+        Thinking...
+      </div>
+    `;
+    container.appendChild(indicatorBlock);
+    container.scrollTop = container.scrollHeight;
+
+    try {
+      let botResponseText = "";
+
+      if (provider === "gemini") {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          botResponseText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No text return from Gemini API.";
+        } else {
+          throw new Error(data?.error?.message || "Google API Error");
+        }
+      } else {
+        const url = `https://api.openai.com/v1/chat/completions`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: "user", content: prompt }]
+          })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          botResponseText = data?.choices?.[0]?.message?.content || "No message return from OpenAI API.";
+        } else {
+          throw new Error(data?.error?.message || "OpenAI API Error");
+        }
+      }
+
+      indicatorBlock.remove();
+      aiChatHistory.push({ role: "assistant", content: botResponseText });
+      localStorage.setItem("dumbo_ai_chat_history", JSON.stringify(aiChatHistory));
+      renderAiChat();
+    } catch (err) {
+      indicatorBlock.remove();
+      showAiError(`API Error: ${err.message}`);
+    }
+  }
+
+  function showAiError(msg) {
+    const errBanner = document.getElementById("aiErrorBanner");
+    errBanner.innerText = msg;
+    errBanner.style.display = "block";
+  }
+
+  function hideAiError() {
+    const errBanner = document.getElementById("aiErrorBanner");
+    errBanner.style.display = "none";
   }
 });

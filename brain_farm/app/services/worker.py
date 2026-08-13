@@ -124,7 +124,12 @@ class SimulationWorker:
                     log = ProjectLog(
                         project_id=expr.project_id,
                         level="WARNING",
-                        message=f"Pre-Screen Filter: Rejected '{expr.expression_text[:35]}...' -> {screen_reason}"
+                        message=(
+                            f"Pre-Screen Filter: Rejected custom expression!\n"
+                            f"Formula: '{expr.expression_text}'\n"
+                            f"Reason: {screen_reason}\n"
+                            f"Advice: Adjust nesting depths, remove duplicate functions (e.g. rank(rank(x))), or utilize supported functions."
+                        )
                     )
                     db.add(log)
                     logger.warning(f"Pre-Screen Filter: Rejected expression {expr.id} -> {screen_reason}")
@@ -145,7 +150,12 @@ class SimulationWorker:
                     log = ProjectLog(
                         project_id=expr.project_id,
                         level="WARNING",
-                        message=f"Duplicate Checker: Rejected '{expr.expression_text[:35]}...' -> {reason}"
+                        message=(
+                            f"Duplicate Checker: Rejected custom expression!\n"
+                            f"Formula: '{expr.expression_text}'\n"
+                            f"Reason: {reason}\n"
+                            f"Advice: Modify parameters (e.g., lookback windows), swap operators, or pick distinct fields from the catalog."
+                        )
                     )
                     db.add(log)
                     logger.warning(f"Duplicate Checker: Rejected expression {expr.id} -> {reason}")
@@ -188,7 +198,12 @@ class SimulationWorker:
                     log = ProjectLog(
                         project_id=expr.project_id,
                         level="WARNING",
-                        message=f"Correlation Filter: Rejected '{expr.expression_text[:35]}...' -> {reason}"
+                        message=(
+                            f"Correlation Filter: Rejected custom expression!\n"
+                            f"Formula: '{expr.expression_text}'\n"
+                            f"Reason: {reason}\n"
+                            f"Advice: Try adding decays, neutralize with distinct sector parameters, or use a crossover strategy to diversify correlation profiles."
+                        )
                     )
                     db.add(log)
                     logger.warning(f"Correlation Filter: Rejected expression {expr.id} -> {reason}")
@@ -536,17 +551,47 @@ class SimulationWorker:
                 if passed:
                     expr.status = "PASSED"
                     level = "SUCCESS"
-                    msg = f"Alpha Mined Passed (Tier {tier})! {expr.expression_text[:30]}... Sharpe: {sharpe:.2f}, Fitness: {fitness:.2f}, Turnover: {turnover:.2%}"
+                    msg = (
+                        f"Alpha Mined Passed (Tier {tier})!\n"
+                        f"Formula: '{expr.expression_text}'\n"
+                        f"Metrics:\n"
+                        f"  - Sharpe: {sharpe:.4f} (Expected >= {proj.min_sharpe:.2f})\n"
+                        f"  - Fitness: {fitness:.4f} (Expected >= {proj.min_fitness:.2f})\n"
+                        f"  - Turnover: {turnover:.2%} (Expected <= {proj.max_turnover:.2%})\n"
+                        f"  - Margin: {margin:.2f} bps (Expected >= {proj.min_margin:.2f} bps)\n"
+                        f"  - Sub-Universe Sharpe: {'Passed' if passed_sub_sharpe else 'Failed'} (Expected >= {proj.min_sub_universe_sharpe:.2f})\n"
+                        f"Advice: Alpha meets all target thresholds. Ready for registry staging."
+                    )
                 else:
                     expr.status = "REJECTED"
                     level = "WARNING"
-                    reasons = []
-                    if sharpe < proj.min_sharpe: reasons.append(f"Sharpe {sharpe:.2f} < {proj.min_sharpe}")
-                    if fitness < proj.min_fitness: reasons.append(f"Fitness {fitness:.2f} < {proj.min_fitness}")
-                    if turnover > proj.max_turnover: reasons.append(f"Turnover {turnover:.2%} > {proj.max_turnover}")
-                    if margin < proj.min_margin: reasons.append(f"Margin {margin:.2f} bps < {proj.min_margin}")
-                    if not passed_sub_sharpe: reasons.append(f"Sub-Universe (Min: {proj.min_sub_universe_sharpe}) failed: {', '.join(failing_sub_universes)}")
-                    msg = f"Alpha Rejected (Tier {tier})! {expr.expression_text[:30]}... Reason: {', '.join(reasons)}"
+                    
+                    advisor_tips = []
+                    if sharpe < proj.min_sharpe:
+                        advisor_tips.append("Low Sharpe: Try adding a lookback window (e.g. ts_delay) or applying cross-sectional ranking to neutralize market beta, or try a different research family style.")
+                    if fitness < proj.min_fitness:
+                        advisor_tips.append("Low Fitness: Improve return-to-turnover ratio by applying decay/smoothing (e.g. ts_decay_linear) to reduce excessive trades, or try combining it with a volume/liquidity filter.")
+                    if turnover > proj.max_turnover:
+                        advisor_tips.append("High Turnover: Apply linear decay (ts_decay_linear) or increase the lookback window of your signals to slow down transition rates.")
+                    if margin < proj.min_margin:
+                        advisor_tips.append("Low Margin: Focus on less liquid or high-spread industry groups, or combine with a price scaling factor, or apply subindustry neutralization.")
+                    if not passed_sub_sharpe:
+                        sub_details = ", ".join(failing_sub_universes)
+                        advisor_tips.append(f"Sub-Universe Sharpe Failure ({sub_details}): The alpha lacks robustness across segments. Consider subindustry neutralization or applying a global cross-sectional rank (e.g., rank(expr)) to stabilize sub-portfolio dynamics.")
+                    
+                    advice_str = " | ".join(advisor_tips) if advisor_tips else "Examine custom formula constraints."
+                    
+                    msg = (
+                        f"Alpha Rejected (Tier {tier})!\n"
+                        f"Formula: '{expr.expression_text}'\n"
+                        f"Metrics Comparison:\n"
+                        f"  - Sharpe: {sharpe:.4f} (Expected >= {proj.min_sharpe:.2f}) -> {'PASS' if sharpe >= proj.min_sharpe else 'FAIL'}\n"
+                        f"  - Fitness: {fitness:.4f} (Expected >= {proj.min_fitness:.2f}) -> {'PASS' if fitness >= proj.min_fitness else 'FAIL'}\n"
+                        f"  - Turnover: {turnover:.2%} (Expected <= {proj.max_turnover:.2%}) -> {'PASS' if turnover <= proj.max_turnover else 'FAIL'}\n"
+                        f"  - Margin: {margin:.2f} bps (Expected >= {proj.min_margin:.2f} bps) -> {'PASS' if margin >= proj.min_margin else 'FAIL'}\n"
+                        f"  - Sub-Universe Sharpe: {'PASS' if passed_sub_sharpe else 'FAIL'} (Expected >= {proj.min_sub_universe_sharpe:.2f})\n"
+                        f"Advice: {advice_str}"
+                    )
                 
                 log = ProjectLog(
                     project_id=proj.id,
@@ -575,10 +620,23 @@ class SimulationWorker:
                 sim.error_message = data.get("message", f"Simulation ended with status: {status}")
                 expr.status = "ERROR"
                 
+                err_msg = sim.error_message
+                advice = "Verify syntax, check for balanced brackets, and ensure all variables are correct."
+                if "unknown variable" in err_msg.lower() or "variable" in err_msg.lower():
+                    advice = "Ensure all database codes (e.g., closing price, specific data field) exist in the data catalog, are spelt correctly, and use the correct capitalization."
+                elif "parse" in err_msg.lower() or "syntax" in err_msg.lower():
+                    advice = "Check formula syntax and match parentheses/brackets, ensuring correct function formatting (e.g., ts_sum(x, 10))."
+                elif "zero division" in err_msg.lower() or "divide by zero" in err_msg.lower():
+                    advice = "Prevent zero division issues by adding a small constant or using safe operators."
+                
                 log = ProjectLog(
                     project_id=proj.id,
                     level="ERROR",
-                    message=f"Simulation {status} for '{expr.expression_text[:30]}...': {sim.error_message}"
+                    message=(
+                        f"Simulation ERROR for '{expr.expression_text}'\n"
+                        f"Error: {err_msg}\n"
+                        f"Advice: {advice}"
+                    )
                 )
                 db.add(log)
                 await db.commit()

@@ -61,11 +61,14 @@ body {
 .sidebar {
     width: var(--sidebar-width);
     background-color: var(--bg-secondary);
-    border-right: 1px solid var(--border-color);
+    border-right: 1px solid rgba(43, 57, 61, 0.5);
     display: flex;
     flex-direction: column;
     padding: 20px;
     flex-shrink: 0;
+    height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .profile-section {
@@ -234,7 +237,6 @@ body {
 .project-summary-box {
     background-color: var(--bg-primary);
     border-radius: 6px;
-    border: 1px dashed var(--border-color);
     padding: 10px;
     margin-top: 10px;
     font-size: 11px;
@@ -278,6 +280,8 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 .main-header {
@@ -324,6 +328,8 @@ body {
     flex-grow: 1;
     padding: 30px;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
 }
 
 .view-panel {
@@ -367,37 +373,39 @@ h2 {
     gap: 20px;
 }
 
-/* Cards system */
+/* Cards system — flat, no boxes */
 .card {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 20px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 20px 0;
     position: relative;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    transition: border-color 0.2s, box-shadow 0.2s;
+    box-shadow: none;
 }
 
 .card:hover {
-    border-color: rgba(0, 230, 118, 0.4);
-    box-shadow: 0 6px 12px rgba(0, 230, 118, 0.03);
+    box-shadow: none;
 }
 
 .card h3 {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
-    margin-bottom: 15px;
-    border-bottom: 1.5px solid var(--border-color);
-    padding-bottom: 8px;
+    margin-bottom: 14px;
+    padding-bottom: 6px;
+    color: var(--text-secondary);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    font-size: 11px;
+    border-bottom: 1px solid rgba(43, 57, 61, 0.5);
 }
 
 .card-header-flex {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1.5px solid var(--border-color);
     padding-bottom: 8px;
     margin-bottom: 15px;
+    border-bottom: 1px solid rgba(43, 57, 61, 0.5);
 }
 
 .card-header-flex h3 {
@@ -546,7 +554,6 @@ h2 {
 .logs-feed {
     background-color: var(--bg-primary);
     border-radius: 6px;
-    border: 1px solid var(--border-color);
     padding: 12px;
     height: 250px;
     overflow-y: auto;
@@ -623,12 +630,12 @@ h2 {
     color: var(--text-secondary);
     font-weight: 600;
     padding: 10px 12px;
-    border-bottom: 2px solid var(--border-color);
+    border-bottom: 1px solid rgba(43, 57, 61, 0.8);
 }
 
 .grid-table td {
     padding: 10px 12px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(43, 57, 61, 0.3);
     vertical-align: middle;
     color: var(--text-primary);
 }
@@ -673,37 +680,31 @@ h2 {
 .status-pill.queued {
     background-color: var(--bg-secondary);
     color: var(--text-secondary);
-    border: 1px solid var(--border-color);
 }
 
 .status-pill.submitting {
-    background-color: rgba(64, 196, 255, 0.1);
+    background-color: rgba(64, 196, 255, 0.12);
     color: var(--info);
-    border: 1px solid var(--info);
 }
 
 .status-pill.polling {
-    background-color: rgba(64, 196, 255, 0.1);
+    background-color: rgba(64, 196, 255, 0.12);
     color: var(--info);
-    border: 1px solid var(--info);
 }
 
 .status-pill.complete {
     background-color: var(--accent-faded);
     color: var(--primary-accent);
-    border: 1px solid var(--primary-accent);
 }
 
 .status-pill.error {
-    background-color: rgba(255, 82, 82, 0.1);
+    background-color: rgba(255, 82, 82, 0.12);
     color: var(--error);
-    border: 1px solid var(--error);
 }
 
 .status-pill.needs_auth {
-    background-color: rgba(255, 215, 64, 0.1);
+    background-color: rgba(255, 215, 64, 0.12);
     color: var(--warning);
-    border: 1px solid var(--warning);
 }
 
 /* Search bar header input styling */
@@ -714,9 +715,23 @@ h2 {
 /* Logging color line borders */
 .log-line {
     border-left: 3px solid var(--border-color);
-    padding: 4px 10px;
-    margin-bottom: 6px;
+    padding: 8px 12px;
+    margin-bottom: 4px;
     font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-left-width 0.1s ease;
+    border-radius: 0 4px 4px 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    line-height: 1.5;
+}
+
+.log-line:hover {
+    background-color: var(--bg-hover);
+    border-left-width: 5px;
 }
 
 .log-line.SUCCESS {
@@ -797,4 +812,49 @@ input[type="range"] {
 /* Wide spanning card item layout */
 .card-wide {
     grid-column: span 2;
+}
+
+/* Modal Styling for Diagnostic Report */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.85);
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    background-color: var(--bg-card);
+    margin: auto;
+    padding: 25px;
+    border: 1px solid var(--border-color);
+    width: 80%;
+    max-width: 800px;
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    position: relative;
+    color: var(--text-primary);
+}
+
+.close-modal {
+    color: var(--text-secondary);
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    position: absolute;
+    right: 20px;
+    top: 15px;
+    transition: color 0.1s;
+}
+
+.close-modal:hover {
+    color: var(--primary-accent);
 }

@@ -16,7 +16,7 @@
   <!-- ApexCharts CDN -->
   <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
   <!-- Main Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=1.1">
+  <link rel="stylesheet" href="style.css?v=1.7">
 </head>
 
 <body>
@@ -48,6 +48,10 @@
           <li><button class="nav-btn" data-view="analytics"><i data-lucide="bar-chart-2"></i> Analytics</button></li>
           <li><button class="nav-btn" data-view="passed-results"><i data-lucide="award"></i> Passed Results</button>
           </li>
+          <li><button class="nav-btn" data-view="project-logs-tab"><i data-lucide="file-text"></i> Diagnostic
+              Logs</button>
+          </li>
+          <li><button class="nav-btn" data-view="ai-assistant"><i data-lucide="bot"></i> AI Assistant</button></li>
         </ul>
       </nav>
 
@@ -64,14 +68,14 @@
       <button class="logout-btn" id="logoutButton" style="display:none;"><i data-lucide="log-out"></i> Log Out</button>
 
       <div class="footer-note">
-        Antigravity Coding © 2026
+        Githinji William © 2026
       </div>
     </aside>
 
     <!-- Main View Panel -->
     <main class="main-content">
       <header class="main-header">
-        <h1>WorldQuant BRAIN Alpha Farm Platform</h1>
+        <h1>WAFP</h1>
         <div class="top-status-bar">
           <span class="status-indicator live" id="workerRunningIndicator">
             <span class="indicator-dot"></span> Background Worker Running
@@ -408,17 +412,6 @@
               </div>
             </div>
 
-            <!-- Mining Farm action logs -->
-            <div class="card" style="margin-top: 25px;">
-              <div class="card-header-flex">
-                <h3>Mining Farm Live Logs</h3>
-                <button class="btn btn-secondary btn-sm" id="btnRefreshLogsQueue"><i data-lucide="refresh-cw"></i>
-                  Refresh Logs</button>
-              </div>
-              <div class="logs-feed" id="miningFarmLogsList" style="max-height: 250px;">
-                <p class="placeholder-text">No messages recorded yet for this project context.</p>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -430,61 +423,103 @@
           </div>
 
           <div id="analyticsContentWrapper">
-            <!-- No metrics placeholder -->
+            <!-- Empty state -->
             <div class="alert alert-info" id="analyticsEmptyAlert" style="display:none;">
               Farming analytics reports will populate once backtests begin completing.
             </div>
 
-            <div class="grid-2col" id="analyticsChartsGrid"
-              style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-              <!-- Sharpe vs Turnover scatterplot -->
-              <div class="card">
-                <h3>Alpha Sharpe Ratio vs Turnover</h3>
-                <div id="scatterChartWrapper" style="height: 350px;"></div>
+            <!-- KPI Summary Row -->
+            <div id="analyticsKpiRow" class="grid-3col" style="margin-bottom: 28px; display: none;">
+              <div class="stat-card">
+                <div class="stat-icon"><i data-lucide="database"></i></div>
+                <div class="stat-number" id="kpiTotalSimulations">—</div>
+                <div class="stat-label">Total Simulations</div>
               </div>
-
-              <!-- Fitness vs Turnover scatterplot -->
-              <div class="card">
-                <h3>Alpha Fitness vs Turnover</h3>
-                <div id="fitnessTurnoverChartWrapper" style="height: 350px;"></div>
+              <div class="stat-card">
+                <div class="stat-icon"><i data-lucide="check-circle-2"></i></div>
+                <div class="stat-number" id="kpiPassRate">—</div>
+                <div class="stat-label">Pass Rate</div>
               </div>
-
-              <!-- Sharpe vs Fitness scatterplot -->
-              <div class="card" style="grid-column: span 2;">
-                <h3>Alpha Sharpe vs Fitness</h3>
-                <div id="sharpeFitnessChartWrapper" style="height: 350px;"></div>
+              <div class="stat-card">
+                <div class="stat-icon"><i data-lucide="trending-up"></i></div>
+                <div class="stat-number" id="kpiBestSharpe">—</div>
+                <div class="stat-label">Best Sharpe Ratio</div>
               </div>
-
-              <!-- Generator Performance Averages -->
-              <div class="card">
-                <h3>Generator Performance Statistics</h3>
-                <div class="table-container">
-                  <table class="grid-table" id="analyticsAveragesTable">
-                    <thead>
-                      <tr>
-                        <th>Generator Type</th>
-                        <th>Avg Sharpe</th>
-                        <th>Avg Fitness</th>
-                        <th>Avg Turnover (%)</th>
-                        <th>Avg Margin</th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
+              <div class="stat-card">
+                <div class="stat-icon"><i data-lucide="activity"></i></div>
+                <div class="stat-number" id="kpiAvgSharpe">—</div>
+                <div class="stat-label">Avg Sharpe</div>
               </div>
-
-              <!-- Jaccard Matrix/Correlation Matrix -->
-              <div class="card card-wide" id="correlationMatrixWrapper" style="display:none; grid-column: span 2;">
-                <h3>Passed Alphas Mutual Correlation Matrix</h3>
-                <div class="table-container">
-                  <table class="grid-table" id="analyticsCorrelationMatrixTable">
-                    <thead></thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
+              <div class="stat-card">
+                <div class="stat-icon"><i data-lucide="zap"></i></div>
+                <div class="stat-number" id="kpiAvgFitness">—</div>
+                <div class="stat-label">Avg Fitness</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon"><i data-lucide="repeat"></i></div>
+                <div class="stat-number" id="kpiAvgTurnover">—</div>
+                <div class="stat-label">Avg Turnover</div>
               </div>
             </div>
+
+            <!-- Charts: 3-column grid -->
+            <div id="analyticsChartsGrid"
+              style="display: none; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 28px;">
+              <div>
+                <div
+                  style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; margin-bottom: 10px;">
+                  Sharpe vs Turnover</div>
+                <div id="scatterChartWrapper" style="height: 300px;"></div>
+              </div>
+              <div>
+                <div
+                  style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; margin-bottom: 10px;">
+                  Fitness vs Turnover</div>
+                <div id="fitnessTurnoverChartWrapper" style="height: 300px;"></div>
+              </div>
+              <div>
+                <div
+                  style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; margin-bottom: 10px;">
+                  Sharpe vs Fitness</div>
+                <div id="sharpeFitnessChartWrapper" style="height: 300px;"></div>
+              </div>
+            </div>
+
+            <!-- Generator Stats Table -->
+            <div id="analyticsStatsSection" style="display:none; margin-bottom: 28px;">
+              <div
+                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; border-bottom: 1px solid rgba(43,57,61,0.5); padding-bottom: 6px; margin-bottom: 14px;">
+                Generator Performance Statistics</div>
+              <div class="table-container">
+                <table class="grid-table" id="analyticsAveragesTable">
+                  <thead>
+                    <tr>
+                      <th>Generator Type</th>
+                      <th>Simulations</th>
+                      <th>Avg Sharpe</th>
+                      <th>Avg Fitness</th>
+                      <th>Avg Turnover</th>
+                      <th>Avg Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Correlation Matrix -->
+            <div id="correlationMatrixWrapper" style="display:none; margin-bottom: 28px;">
+              <div
+                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; border-bottom: 1px solid rgba(43,57,61,0.5); padding-bottom: 6px; margin-bottom: 14px;">
+                Passed Alphas Mutual Correlation Matrix</div>
+              <div class="table-container">
+                <table class="grid-table" id="analyticsCorrelationMatrixTable">
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         </section>
 
@@ -523,7 +558,7 @@
                     </select>
                   </label>
                 </div>
-                <div class="table-container" style="max-height: 420px; overflow-y: auto;">
+                <div class="table-container">
                   <table class="grid-table" id="passedAlphasTable" style="cursor: pointer;">
                     <thead>
                       <tr>
@@ -755,13 +790,191 @@
           </div>
         </section>
 
+        <!-- View 7: Diagnostic Logs -->
+        <section id="view-project-logs-tab" class="view-panel">
+          <h2>Diagnostic Logs & Analysis</h2>
+          <div class="auth-warning" id="logsProjectWarning">
+            <i data-lucide="alert-triangle"></i> Please choose or create a project context.
+          </div>
+
+          <div id="logsContentWrapper" style="display: none;">
+            <!-- Logs Controls & Filters -->
+            <div class="card" style="margin-bottom: 20px;">
+              <div class="card-header-flex" style="flex-wrap: wrap; gap: 15px; border-bottom: none; padding-bottom: 0;">
+                <h3>Diagnostics Filters & Actions</h3>
+                <div class="btn-row" style="margin-left: auto; gap: 10px; margin-top: 0; align-items: center;">
+                  <button class="btn btn-primary" id="btnGenerateReport"><i data-lucide="file-text"></i> Generate
+                    Diagnostic Report</button>
+                  <button class="btn btn-secondary" id="btnExportLogsTXT"><i data-lucide="download"></i> Export
+                    TXT</button>
+                  <button class="btn btn-secondary" id="btnExportLogsCSV"><i data-lucide="download"></i> Export
+                    CSV</button>
+                  <button class="btn btn-secondary" id="btnExportLogsMD"><i data-lucide="download"></i> Export
+                    Markdown</button>
+                </div>
+              </div>
+
+              <div class="filter-bar"
+                style="display: flex; gap: 20px; align-items: center; margin-top: 15px; flex-wrap: wrap;">
+                <div class="form-group" style="margin: 0; min-width: 150px;">
+                  <label for="filterLogLevelSelect" style="margin-bottom: 4px;">Severity Level</label>
+                  <select id="filterLogLevelSelect"
+                    style="width: 100%; padding: 6px; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+                    <option value="ALL" selected>All Levels</option>
+                    <option value="SUCCESS">SUCCESS</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin: 0; flex-grow: 1; min-width: 250px;">
+                  <label for="inputLogSearch" style="margin-bottom: 4px;">Search Messages</label>
+                  <input type="text" id="inputLogSearch"
+                    placeholder="Fuzzy query by keywords (e.g. Sharpe, duplicate)..."
+                    style="width: 100%; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+                </div>
+
+                <div class="form-group" style="margin: 0; min-width: 100px;">
+                  <label for="selectLogLimit" style="margin-bottom: 4px;">Limit</label>
+                  <select id="selectLogLimit"
+                    style="width: 100%; padding: 6px; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+                    <option value="40">40</option>
+                    <option value="100" selected>100</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                  </select>
+                </div>
+
+                <button class="btn btn-secondary" id="btnRefreshDiagnostics"
+                  style="margin-top: 18px; padding: 6px 12px;"><i data-lucide="refresh-cw"></i> Refresh</button>
+              </div>
+            </div>
+
+            <!-- Virtual-scroll Log Feed (no card wrapper) -->
+            <div id="logsFeedViewport"
+              style="position: relative; overflow-y: auto; font-family: monospace; background: var(--bg-primary); border-radius: 6px; margin-top: 4px;">
+              <!-- Spacer that gives the scrollbar its full height -->
+              <div id="logsFeedSpacer" style="position: absolute; top: 0; left: 0; width: 1px;"></div>
+              <!-- Rendered rows anchored by translateY inside JS -->
+              <div id="logsFeedList" style="position: relative; width: 100%;"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 8: AI Assistant -->
+        <section id="view-ai-assistant" class="view-panel">
+          <h2>AI Assistant</h2>
+
+          <!-- API Config -->
+          <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 24px; flex-wrap: wrap;">
+            <div class="form-group" style="margin:0; min-width: 160px;">
+              <label for="aiProviderSelect">Provider</label>
+              <select id="aiProviderSelect">
+                <option value="gemini">Google Gemini</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0; flex:1; min-width: 260px;">
+              <label for="aiApiKeyInput">API Key</label>
+              <input type="password" id="aiApiKeyInput" placeholder="Paste your API key here…">
+            </div>
+            <div class="form-group" style="margin:0; min-width: 160px;">
+              <label for="aiModelInput">Model</label>
+              <input type="text" id="aiModelInput" placeholder="e.g. gemini-1.5-flash">
+            </div>
+            <button class="btn btn-secondary" id="btnSaveAiKey" style="margin-bottom:0; flex-shrink:0;">
+              <i data-lucide="save"></i> Save Config
+            </button>
+            <button class="btn btn-secondary" id="btnClearAiChat"
+              style="margin-bottom:0; flex-shrink:0; color: var(--error);">
+              <i data-lucide="trash-2"></i> Clear Chat
+            </button>
+          </div>
+
+          <div id="aiSavedBadge" style="display:none; margin-bottom:14px;">
+            <span class="status-pill complete" style="font-size:12px; padding: 4px 10px;">
+              <i data-lucide="check-circle-2"
+                style="width:12px;height:12px;vertical-align:middle;margin-right:4px;"></i>
+              Config saved
+            </span>
+          </div>
+
+          <!-- Chat window -->
+          <div id="aiChatWindow"
+            style="background: var(--bg-primary); border-radius: 8px; padding: 16px; min-height: 340px; max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; font-size: 13px;">
+            <p class="placeholder-text" id="aiChatPlaceholder">Configure your API key above and start a conversation.
+            </p>
+          </div>
+
+          <!-- Input row -->
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <textarea id="aiMessageInput"
+              style="flex:1; resize: vertical; min-height: 54px; max-height: 140px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 10px 14px; font-size: 13px; font-family: 'Poppins', sans-serif; outline:none; transition: border-color 0.2s;"
+              placeholder="Ask the AI anything about alpha strategies, formulas, or your results…"></textarea>
+            <button class="btn btn-primary" id="btnSendAiMessage" style="height: 54px; padding: 0 22px; flex-shrink:0;">
+              <i data-lucide="send"></i>
+            </button>
+          </div>
+
+          <div id="aiErrorBanner" class="alert alert-error" style="display:none; margin-top:14px;"></div>
+        </section>
+
       </div>
     </main>
+  </div>
 
+  <!-- Modal: Diagnostic Report (body-level so position:fixed works) -->
+  <div id="logsReportModal" class="modal"
+    style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.82); align-items: center; justify-content: center;">
+    <div class="modal-content"
+      style="background-color: var(--bg-card); margin: auto; padding: 25px; border: 1px solid var(--border-color); width: 70%; max-width: 800px; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.6); position: relative;">
+      <span class="close-modal" id="closeReportModal">&times;</span>
+      <h2 style="margin-top: 0; color: var(--primary-accent); display: flex; align-items: center; gap: 8px;"><i
+          data-lucide="file-text"></i> Alpha Diagnostic Report</h2>
+      <hr class="divider">
+      <div id="reportModalBody"
+        style="max-height: 480px; overflow-y: auto; color: var(--text-primary); font-family: monospace; white-space: pre-wrap; font-size: 13px; line-height: 1.6; background: var(--bg-primary); padding: 15px; border-radius: 6px; border: 1px solid var(--border-color);">
+        Loading report...
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-secondary" id="btnDownloadReportMD"><i data-lucide="download"></i> Download Report
+          (.md)</button>
+        <button class="btn btn-primary" id="btnCloseReportBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Log Detail (body-level so position:fixed works) -->
+  <div id="logDetailModal" class="modal"
+    style="display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.87); align-items: center; justify-content: center;">
+    <div class="modal-content"
+      style="background-color: var(--bg-card); margin: auto; padding: 28px; border: 1px solid var(--border-color); width: 85%; max-width: 660px; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.7); position: relative;">
+      <span class="close-modal" id="closeLogDetailModal">&times;</span>
+      <h2 style="margin-top: 0; color: var(--primary-accent); display: flex; align-items: center; gap: 8px;"
+        id="logDetailTitle">
+        <i data-lucide="info"></i> Log Details
+      </h2>
+      <hr class="divider">
+      <div style="display: flex; gap: 20px; margin-bottom: 18px; font-size: 13px; color: var(--text-secondary);">
+        <div><strong>Timestamp:</strong> <span id="logDetailTimestamp">-</span></div>
+        <div><strong>Severity:</strong> <span class="status-pill" id="logDetailLevel"
+            style="text-transform: uppercase;">-</span></div>
+      </div>
+      <div id="logDetailBody"
+        style="display: flex; flex-direction: column; gap: 15px; font-size: 13px; color: var(--text-primary); max-height: 400px; overflow-y: auto;">
+        <!-- Populated dynamically -->
+      </div>
+      <div style="margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-secondary" id="btnCopyDetailFormula" style="display: none;"><i data-lucide="copy"></i>
+          Copy Formula</button>
+        <button class="btn btn-primary" id="btnCloseLogDetailBtn">Close</button>
+      </div>
+    </div>
   </div>
 
   <!-- Javascript Core Logic -->
-  <script src="app.js"></script>
+  <script src="app.js?v=2.6"></script>
 </body>
 
 </html>
