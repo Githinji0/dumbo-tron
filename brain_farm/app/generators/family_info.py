@@ -207,5 +207,66 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
             "group_neutralize(rank(close) + rank(ebit) / rank(sales), subindustry)",
             "group_neutralize(rank(ts_decay_linear(rank(close), {window})) + rank(ebit) / rank(close), subindustry)"
         ]
+    },
+    "MEAN_REVERSION": {
+        "description": "Short-term extreme price moves overreact and tend to mean-revert.",
+        "allowed_fields": ["close", "open", "vwap", "volume"],
+        "preferred_operators": ["ts_zscore", "ts_rank", "rank", "group_neutralize"],
+        "incompatible_operators": [],
+        "neutralization": "SUBINDUSTRY",
+        "turnover_range": (0.40, 0.90),
+        "templates": [
+            "-ts_rank({field}, {window})",
+            "group_neutralize(-ts_zscore({field}, {window}), industry)",
+            "-rank(ts_zscore({field}, {window1})) * ts_decay_linear(volume, {window2})"
+        ]
+    },
+    "ANALYST": {
+        "description": "Analyst sentiment, revision patterns, and forward expectations contain directional information.",
+        "allowed_fields": ["eps_estimate", "close", "volume"],
+        "preferred_operators": ["ts_delta", "ts_mean", "rank", "group_neutralize"],
+        "incompatible_operators": [],
+        "neutralization": "INDUSTRY",
+        "turnover_range": (0.05, 0.30),
+        "templates": [
+            "group_neutralize(ts_delta(eps_estimate, {window}), industry)",
+            "ts_decay_linear(rank(ts_delta(eps_estimate, {window1})), {window2})"
+        ]
+    },
+    "EVENT": {
+        "description": "Corporate event proxies, such as earnings releases or volume spike anomalies.",
+        "allowed_fields": ["volume", "close", "open"],
+        "preferred_operators": ["ts_zscore", "rank", "group_neutralize"],
+        "incompatible_operators": [],
+        "neutralization": "SUBINDUSTRY",
+        "turnover_range": (0.20, 0.60),
+        "templates": [
+            "group_neutralize(ts_zscore(volume, {window}), subindustry)",
+            "rank(volume / ts_mean(volume, {window}))"
+        ]
+    },
+    "FUNDAMENTAL_ACCELERATION": {
+        "description": "Acceleration in core financial metrics like earnings growth or revenue growth velocity.",
+        "allowed_fields": ["net_income", "revenue", "sales"],
+        "preferred_operators": ["ts_delta", "rank", "group_neutralize"],
+        "incompatible_operators": [],
+        "neutralization": "SUBINDUSTRY",
+        "turnover_range": (0.02, 0.15),
+        "templates": [
+            "group_neutralize(rank(ts_delta(revenue, 20) - ts_delta(revenue, 60)), subindustry)",
+            "ts_delta(ts_delta(net_income, {window}), {window})"
+        ]
+    },
+    "RELATIVE_VALUE": {
+        "description": "Valuation metrics relative to industry/subindustry peers, correcting for industry group bias.",
+        "allowed_fields": ["book_value", "ebit", "sales", "close"],
+        "preferred_operators": ["rank", "group_neutralize"],
+        "incompatible_operators": [],
+        "neutralization": "SUBINDUSTRY",
+        "turnover_range": (0.01, 0.15),
+        "templates": [
+            "group_neutralize(rank(book_value) / rank(close), subindustry)",
+            "group_neutralize(rank(ebit) / rank(close), industry)"
+        ]
     }
 }

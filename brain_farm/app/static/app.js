@@ -16,8 +16,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Chart instances
   let scatterChart = null;
-  let fitnessChart = null;
-  let sharpeDensityChart = null;
+  let fitnessTurnoverChart = null;
+  let sharpeFitnessChart = null;
 
   // Initialisation
   initNav();
@@ -244,6 +244,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Export Result Files
     document.getElementById("btnExportCSV").addEventListener("click", () => downloadPassedFile("csv"));
     document.getElementById("btnExportJSON").addEventListener("click", () => downloadPassedFile("json"));
+
+    // Filter controls for Passed Alphas
+    document.getElementById("filterParetoOnly").addEventListener("change", loadPassedResults);
+    document.getElementById("filterTierSelect").addEventListener("change", loadPassedResults);
 
     // Submit Alpha to Registry
     document.getElementById("btnSubmitToRegistry").addEventListener("click", handleRegistrySubmission);
@@ -870,8 +874,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Render Charts & Statistics values
       renderScatterChart(data);
-      renderFitnessBoxesChart(data);
-      renderSharpeRangesChart(data);
+      renderFitnessTurnoverChart(data);
+      renderSharpeFitnessChart(data);
       renderAnalyticsAveragesTable(data);
 
       // Calculate mutual correlations if we have passed alphas
@@ -882,24 +886,27 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderScatterChart(items) {
-    const seriesData = items.map(item => ({
-      x: parseFloat(item.turnover.toFixed(2)),
-      y: parseFloat(item.sharpe.toFixed(2)),
-      name: item.generator
-    }));
+    // 1. Turnover vs Sharpe (x = turnover, y = sharpe)
+    const grouped = { "Pareto Frontier": [] };
 
-    // Group series by generator type
-    const grouped = {};
-    seriesData.forEach(pt => {
-      const grp = pt.name;
-      if (!grouped[grp]) grouped[grp] = [];
-      grouped[grp].push([pt.x, pt.y]);
+    items.forEach(item => {
+      const x = parseFloat(item.turnover.toFixed(2));
+      const y = parseFloat(item.sharpe.toFixed(3));
+      if (item.pareto_optimal) {
+        grouped["Pareto Frontier"].push([x, y]);
+      } else {
+        const grp = item.generator || "Standard Generator";
+        if (!grouped[grp]) grouped[grp] = [];
+        grouped[grp].push([x, y]);
+      }
     });
 
-    const series = Object.keys(grouped).map(key => ({
-      name: key,
-      data: grouped[key]
-    }));
+    const series = Object.keys(grouped)
+      .filter(k => grouped[k].length > 0)
+      .map(key => ({
+        name: key,
+        data: grouped[key]
+      }));
 
     const options = {
       chart: {
@@ -907,9 +914,9 @@ document.addEventListener("DOMContentLoaded", () => {
         height: '100%',
         background: 'transparent',
         foreColor: 'var(--text-secondary)',
-        toolbar: { show: false }
+        toolbar: { show: true }
       },
-      colors: ['#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
+      colors: ['#ff007f', '#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
       series: series,
       xaxis: {
         title: { text: 'Turnover Rate (%)' },
@@ -928,101 +935,103 @@ document.addEventListener("DOMContentLoaded", () => {
     scatterChart.render();
   }
 
-  function renderFitnessBoxesChart(items) {
-    // Collect Fitness by generator type
-    const grouped = {};
-    items.forEach(pt => {
-      const key = pt.generator;
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(pt.fitness);
+  function renderFitnessTurnoverChart(items) {
+    // 2. Fitness vs Turnover (x = turnover, y = fitness)
+    const grouped = { "Pareto Frontier": [] };
+
+    items.forEach(item => {
+      const x = parseFloat(item.turnover.toFixed(2));
+      const y = parseFloat(item.fitness.toFixed(3));
+      if (item.pareto_optimal) {
+        grouped["Pareto Frontier"].push([x, y]);
+      } else {
+        const grp = item.generator || "Standard Generator";
+        if (!grouped[grp]) grouped[grp] = [];
+        grouped[grp].push([x, y]);
+      }
     });
 
-    const series = Object.keys(grouped).map(key => {
-      const vals = grouped[key].sort((a, b) => a - b);
-      // Min, Q1, Median, Q3, Max box values
-      const min = vals[0];
-      const max = vals[vals.length - 1];
-      const midIdx = Math.floor(vals.length / 2);
-      const median = vals.length % 2 !== 0 ? vals[midIdx] : (vals[midIdx - 1] + vals[midIdx]) / 2;
-
-      const q1Idx = Math.floor(vals.length / 4);
-      const q1 = vals[q1Idx];
-      const q3Idx = Math.floor(vals.length * 3 / 4);
-      const q3 = vals[q3Idx];
-
-      return {
-        x: key,
-        y: [
-          parseFloat(min.toFixed(3)),
-          parseFloat(q1.toFixed(3)),
-          parseFloat(median.toFixed(3)),
-          parseFloat(q3.toFixed(3)),
-          parseFloat(max.toFixed(3))
-        ]
-      };
-    });
+    const series = Object.keys(grouped)
+      .filter(k => grouped[k].length > 0)
+      .map(key => ({
+        name: key,
+        data: grouped[key]
+      }));
 
     const options = {
       chart: {
-        type: 'boxPlot',
+        type: 'scatter',
         height: '100%',
         background: 'transparent',
         foreColor: 'var(--text-secondary)',
-        toolbar: { show: false }
+        toolbar: { show: true }
       },
-      colors: ['#00e676', '#40c4ff'],
-      series: [{ data: series }],
-      yaxis: { title: { text: 'Fitness Score' } },
-      grid: { borderColor: 'var(--border-color)' },
-      theme: { mode: 'dark' }
+      colors: ['#ff007f', '#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
+      series: series,
+      xaxis: {
+        title: { text: 'Turnover Rate (%)' },
+        labels: { formatter: val => `${val}%` }
+      },
+      yaxis: {
+        title: { text: 'Fitness Score' }
+      },
+      legend: { position: 'top', horizontalAlign: 'right' },
+      theme: { mode: 'dark' },
+      grid: { borderColor: 'var(--border-color)' }
     };
 
-    if (fitnessChart) fitnessChart.destroy();
-    fitnessChart = new ApexCharts(document.getElementById("fitnessChartWrapper"), options);
-    fitnessChart.render();
+    if (fitnessTurnoverChart) fitnessTurnoverChart.destroy();
+    fitnessTurnoverChart = new ApexCharts(document.getElementById("fitnessTurnoverChartWrapper"), options);
+    fitnessTurnoverChart.render();
   }
 
-  function renderSharpeRangesChart(items) {
-    const bins = {
-      "< 0.5": 0, "0.5 - 1.0": 0, "1.0 - 1.5": 0, "1.5 - 2.0": 0, "2.0+": 0
-    };
+  function renderSharpeFitnessChart(items) {
+    // 3. Sharpe vs Fitness (x = fitness, y = sharpe)
+    const grouped = { "Pareto Frontier": [] };
 
-    items.forEach(pt => {
-      const sh = pt.sharpe;
-      if (sh < 0.5) bins["< 0.5"]++;
-      else if (sh < 1.0) bins["0.5 - 1.0"]++;
-      else if (sh < 1.5) bins["1.0 - 1.5"]++;
-      else if (sh < 2.0) bins["1.5 - 2.0"]++;
-      else bins["2.0+"]++;
+    items.forEach(item => {
+      const x = parseFloat(item.fitness.toFixed(3));
+      const y = parseFloat(item.sharpe.toFixed(3));
+      if (item.pareto_optimal) {
+        grouped["Pareto Frontier"].push([x, y]);
+      } else {
+        const grp = item.generator || "Standard Generator";
+        if (!grouped[grp]) grouped[grp] = [];
+        grouped[grp].push([x, y]);
+      }
     });
+
+    const series = Object.keys(grouped)
+      .filter(k => grouped[k].length > 0)
+      .map(key => ({
+        name: key,
+        data: grouped[key]
+      }));
 
     const options = {
       chart: {
-        type: 'bar',
+        type: 'scatter',
         height: '100%',
         background: 'transparent',
         foreColor: 'var(--text-secondary)',
-        toolbar: { show: false }
+        toolbar: { show: true }
       },
-      colors: ['#00e676'],
-      plotOptions: {
-        bar: { borderRadius: 4, horizontal: true }
-      },
-      series: [{
-        name: 'Alpha Count',
-        data: Object.values(bins)
-      }],
+      colors: ['#ff007f', '#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
+      series: series,
       xaxis: {
-        categories: Object.keys(bins),
-        title: { text: 'Count of Candidates' }
+        title: { text: 'Fitness Score' }
       },
-      grid: { borderColor: 'var(--border-color)' },
-      theme: { mode: 'dark' }
+      yaxis: {
+        title: { text: 'Sharpe Ratio' }
+      },
+      legend: { position: 'top', horizontalAlign: 'right' },
+      theme: { mode: 'dark' },
+      grid: { borderColor: 'var(--border-color)' }
     };
 
-    if (sharpeDensityChart) sharpeDensityChart.destroy();
-    sharpeDensityChart = new ApexCharts(document.getElementById("sharpeRangesChartWrapper"), options);
-    sharpeDensityChart.render();
+    if (sharpeFitnessChart) sharpeFitnessChart.destroy();
+    sharpeFitnessChart = new ApexCharts(document.getElementById("sharpeFitnessChartWrapper"), options);
+    sharpeFitnessChart.render();
   }
 
   function renderAnalyticsAveragesTable(items) {
@@ -1170,31 +1179,69 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("inspectFamily").innerText = alpha.research_family || "N/A";
     document.getElementById("inspectComplexity").innerText = alpha.complexity_score || "N/A";
 
-    const compScore = alpha.composite_research_score !== undefined ? alpha.composite_research_score : 0.0;
+    const isParetoText = alpha.pareto_optimal ? "Yes" : "No";
+    document.getElementById("inspectTierPareto").innerText = `Tier ${alpha.candidate_tier} / Pareto: ${isParetoText}`;
+
+    // Populate Hypothesis and Lineage details
+    document.getElementById("inspectHypothesis").innerText = alpha.hypothesis || "N/A";
+    document.getElementById("inspectLineageId").innerText = alpha.lineage_id !== undefined && alpha.lineage_id !== null ? alpha.lineage_id : "N/A";
+    document.getElementById("inspectParentId").innerText = alpha.parent_id !== undefined && alpha.parent_id !== null ? alpha.parent_id : "N/A";
+    document.getElementById("inspectGeneration").innerText = alpha.generation_number !== undefined && alpha.generation_number !== null ? alpha.generation_number : "0";
+
+    // Build optimization trace flowchart
+    let trace = [];
+    let curr = alpha;
+    const allAlphas = window.cachedPassed || [];
+    while (curr) {
+      trace.unshift(curr);
+      const parentId = curr.parent_id !== undefined ? curr.parent_id : curr.transformation_parent;
+      if (parentId !== undefined && parentId !== null) {
+        const found = allAlphas.find(x => x.db_id === parentId);
+        if (found && found !== curr) {
+          curr = found;
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+    let traceText = "";
+    trace.forEach((node, idx) => {
+      if (idx > 0) {
+        const type = node.transformation_type || node.mutation_type || "MUTATION";
+        traceText += `\n       ↓ [${type}]\n\n`;
+      }
+      traceText += `${node.generator || "Base"} (ID: ${node.db_id})
+  Expr: ${node.expression}
+  Sharpe: ${node.sharpe.toFixed(3)} | Fitness: ${node.fitness.toFixed(3)} | Turnover: ${node.turnover.toFixed(2)}%`;
+    });
+    document.getElementById("inspectEvolutionTrace").innerText = traceText || "No evolutionary lineage path identified.";
+
+    const compScore = alpha.alpha_research_score !== undefined ? alpha.alpha_research_score : 0.0;
     document.getElementById("inspectCompositeScore").innerText = compScore.toFixed(3);
 
-    // Components calculation from metrics
-    const research = (alpha.sharpe / 6.0) + (alpha.fitness / 6.0);
-    const simplicity = 1.0 - ((alpha.complexity_score || 1.0) - 1.0) / 19.0;
-    const diversity = alpha.correlation_score !== undefined ? alpha.correlation_score : 1.0;
+    // Dynamic multi-factor scoring details retrieved from backend
+    const research = alpha.composite_research_score !== undefined ? alpha.composite_research_score : 0.0;
+    const robustness = alpha.robustness_score !== undefined ? alpha.robustness_score : 0.0;
+    const diversity = alpha.diversity_score !== undefined ? alpha.diversity_score : 1.0;
+    const simplicity = alpha.simplicity_score !== undefined ? alpha.simplicity_score : 1.0;
 
-    const penalty = (alpha.parameter_sensitivity && alpha.parameter_sensitivity.penalty !== undefined)
-      ? alpha.parameter_sensitivity.penalty
-      : 1.0;
-    const rawRobustness = ((alpha.walk_forward_score || 0.0) + (alpha.regime_score || 0.0)) / 2.0;
-    const robustness = rawRobustness * penalty;
-
-    document.getElementById("inspectSubResearch").innerText = Math.max(0.0, Math.min(1.0, research)).toFixed(2);
-    document.getElementById("inspectSubRobustness").innerText = Math.max(0.0, Math.min(1.0, robustness)).toFixed(2);
-    document.getElementById("inspectSubDiversity").innerText = Math.max(0.0, Math.min(1.0, diversity)).toFixed(2);
-    document.getElementById("inspectSubSimplicity").innerText = Math.max(0.0, Math.min(1.0, simplicity)).toFixed(2);
+    document.getElementById("inspectSubResearch").innerText = research.toFixed(2);
+    document.getElementById("inspectSubRobustness").innerText = robustness.toFixed(2);
+    document.getElementById("inspectSubDiversity").innerText = diversity.toFixed(2);
+    document.getElementById("inspectSubSimplicity").innerText = simplicity.toFixed(2);
 
     // IC stats
     document.getElementById("inspectRankIc").innerText = alpha.rank_ic !== undefined ? alpha.rank_ic.toFixed(4) : "N/A";
     document.getElementById("inspectIcIr").innerText = alpha.ic_ir !== undefined ? alpha.ic_ir.toFixed(4) : "N/A";
     const posRatio = alpha.positive_ic_ratio !== undefined ? (alpha.positive_ic_ratio * 100).toFixed(1) + "%" : "N/A";
     document.getElementById("inspectPosRatio").innerText = posRatio;
-    document.getElementById("inspectWalkForward").innerText = alpha.walk_forward_score !== undefined ? alpha.walk_forward_score.toFixed(3) : "N/A";
+
+    // Detailed Walk-forward output
+    const wfMin = alpha.walk_forward_min_sharpe !== undefined ? alpha.walk_forward_min_sharpe.toFixed(2) : "N/A";
+    const wfMed = alpha.walk_forward_median_sharpe !== undefined ? alpha.walk_forward_median_sharpe.toFixed(2) : "N/A";
+    document.getElementById("inspectWalkForward").innerText = `Score: ${alpha.walk_forward_score.toFixed(2)} (Med: ${wfMed}, Min: ${wfMin})`;
 
     // Regimes
     document.getElementById("inspectRegimeScore").innerText = alpha.regime_score !== undefined ? alpha.regime_score.toFixed(3) : "N/A";
@@ -1203,6 +1250,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("inspectHighVolSharpe").innerText = regPerf.sharpe_run_high !== undefined ? regPerf.sharpe_run_high.toFixed(3) : "N/A";
 
     // Sensitivity
+    const penalty = alpha.parameter_stability_score !== undefined ? alpha.parameter_stability_score : 1.0;
     document.getElementById("inspectSensitivityPenalty").innerText = penalty.toFixed(2);
     const sensList = document.getElementById("inspectSensitivityList");
     sensList.innerHTML = "";
@@ -1251,14 +1299,27 @@ document.addEventListener("DOMContentLoaded", () => {
       const passed = await res.json();
       window.cachedPassed = passed;
 
+      // Extract client-side checkbox and dropdown filters
+      const paretoOnly = document.getElementById("filterParetoOnly").checked;
+      const tierFilter = document.getElementById("filterTierSelect").value;
+
+      let filtered = passed;
+      if (paretoOnly) {
+        filtered = filtered.filter(p => p.pareto_optimal);
+      }
+      if (tierFilter !== "ALL") {
+        const targetTier = parseInt(tierFilter);
+        filtered = filtered.filter(p => p.candidate_tier === targetTier);
+      }
+
       const tbody = document.querySelector("#passedAlphasTable tbody");
       tbody.innerHTML = "";
 
       const select = document.getElementById("passedRegistryAlphaSelector");
       select.innerHTML = "";
 
-      if (passed.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center">No qualified passed alphas recorded in this project context yet.</td></tr>';
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center">No alphas match the filter criteria.</td></tr>';
 
         const opt = document.createElement("option");
         opt.value = "";
@@ -1270,7 +1331,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      passed.forEach(p => {
+      filtered.forEach(p => {
         const tr = document.createElement("tr");
         tr.setAttribute("data-db-id", String(p.db_id));
         tr.addEventListener("click", () => selectPassedAlpha(p));
@@ -1291,19 +1352,23 @@ document.addEventListener("DOMContentLoaded", () => {
         const turnTd = document.createElement("td");
         turnTd.innerText = `${p.turnover}%`;
 
-        const marginTd = document.createElement("td");
-        marginTd.innerText = p.margin;
+        const tierTd = document.createElement("td");
+        tierTd.innerHTML = `<span class="badge" style="background:var(--bg-hover); color:#40c4ff;">Tier ${p.candidate_tier}</span>`;
 
-        const genTd = document.createElement("td");
-        genTd.innerHTML = `<span class="badge" style="background:var(--bg-hover); border:1px solid var(--border-color); color:var(--primary-accent)">${p.generator}</span>`;
+        const paretoTd = document.createElement("td");
+        if (p.pareto_optimal) {
+          paretoTd.innerHTML = `<span class="badge" style="background:#ff5252; color:#fff;">Pareto</span>`;
+        } else {
+          paretoTd.innerHTML = `<span style="color:var(--text-secondary);">-</span>`;
+        }
 
         tr.appendChild(idTd);
         tr.appendChild(exprTd);
         tr.appendChild(sharpeTd);
         tr.appendChild(fitnessTd);
         tr.appendChild(turnTd);
-        tr.appendChild(marginTd);
-        tr.appendChild(genTd);
+        tr.appendChild(tierTd);
+        tr.appendChild(paretoTd);
         tbody.appendChild(tr);
 
         // Add to selector drop down if registered ID exists
@@ -1323,8 +1388,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // Auto-select first row
-      if (passed.length > 0) {
-        selectPassedAlpha(passed[0]);
+      if (filtered.length > 0) {
+        selectPassedAlpha(filtered[0]);
       } else {
         document.getElementById("inspectorDetailsPlaceholder").style.display = "block";
         document.getElementById("inspectorDetailsContent").style.display = "none";

@@ -71,6 +71,28 @@ class Expression(Base):
     parameter_sensitivity: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     regime_performance: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # Hypothesis-Driven additions
+    expected_horizon: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    selected_fields: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    selected_operators: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    operator_parameters: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    expected_turnover_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
+    # Lineage and mutation tracking additions
+    parent_alpha_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    generation_number: Mapped[int] = mapped_column(Integer, default=1)
+    mutation_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    mutation_parameters: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    
+    # Complexity tracking additions
+    expression_depth: Mapped[int] = mapped_column(Integer, default=1)
+    operator_count: Mapped[int] = mapped_column(Integer, default=0)
+    field_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Transformation tracking additions
+    transformation_parent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    transformation_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     project: Mapped["Project"] = relationship("Project", back_populates="expressions")
     simulations: Mapped[List["Simulation"]] = relationship("Simulation", back_populates="expression", cascade="all, delete-orphan")
 
@@ -122,6 +144,27 @@ class Metric(Base):
     regime_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
     correlation_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
     composite_research_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+
+    # Upgraded Metric fields
+    stability_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    robustness_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    diversity_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    simplicity_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    alpha_research_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+
+    walk_forward_mean_sharpe: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    walk_forward_median_sharpe: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    walk_forward_min_sharpe: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    walk_forward_variance: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    parameter_stability_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+
+    experiment_count: Mapped[int] = mapped_column(Integer, default=1)
+    family_experiment_count: Mapped[int] = mapped_column(Integer, default=1)
+    lineage_experiment_count: Mapped[int] = mapped_column(Integer, default=1)
+
+    pareto_optimal: Mapped[bool] = mapped_column(Boolean, default=False)
+    candidate_tier: Mapped[int] = mapped_column(Integer, default=0)
+    multiple_testing_adjusted_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

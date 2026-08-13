@@ -5,7 +5,7 @@ from brain_farm.app.generators.family_gen import FamilyGenerator
 def test_research_families_metadata():
     # Verify that all 17 families exist and have valid keys
     required_keys = {"description", "allowed_fields", "preferred_operators", "neutralization", "turnover_range", "templates"}
-    assert len(RESEARCH_FAMILIES) == 17
+    assert len(RESEARCH_FAMILIES) >= 17
     for name, info in RESEARCH_FAMILIES.items():
         assert required_keys.issubset(info.keys())
         assert isinstance(info["allowed_fields"], list)

@@ -688,14 +688,82 @@ async def launch_farm(request: Request, req: LaunchFarmRequest):
         # Insert Expressions to DB as PENDING
         created_exprs = []
         for text, parent_obj, family_name, hypothesis_text in candidates_with_meta:
+            # Check if FamilyGenerator populated detailed metadata
+            meta = {}
+            if req.engine == "Research Family Generator" and 'gen' in locals():
+                meta = getattr(gen, "generated_metadata", {}).get(text, {})
+            
+            # If not populated, generate basic metadata
+            if not meta:
+                from brain_farm.app.generators.expression_analyzer import analyze_expression
+                analysis = analyze_expression(text, p_fields)
+                
+                # Determine horizon
+                max_w = 20
+                if analysis.get("parameters"):
+                    m_vals = list(analysis["parameters"].values())
+                    if m_vals:
+                        max_w = max(m_vals)
+                horizon = "SHORT" if max_w <= 5 else "LONG" if max_w >= 30 else "MEDIUM"
+                
+                # Setup expected turnover category
+                from brain_farm.app.generators.family_info import RESEARCH_FAMILIES
+                avg_turnover = 0.20
+                if family_name and family_name in RESEARCH_FAMILIES:
+                    turnover_range = RESEARCH_FAMILIES[family_name].get("turnover_range", (0.05, 0.40))
+                    avg_turnover = sum(turnover_range) / 2.0
+                expected_turnover_category = "HIGH_RETURN_HIGH_TURNOVER" if avg_turnover > 0.40 else "HIGH_RETURN_LOW_TURNOVER"
+                
+                meta = {
+                    "research_family": family_name,
+                    "hypothesis": hypothesis_text or f"Exploratory search using {req.engine}.",
+                    "expected_horizon": horizon,
+                    "selected_fields": ", ".join(analysis["fields"]),
+                    "selected_operators": ", ".join(analysis["operators"]),
+                    "operator_parameters": analysis["parameters"],
+                    "expected_turnover_category": expected_turnover_category,
+                    "expected_signal_behavior": f"Automatically generated signal using {req.engine}.",
+                    "expression_depth": analysis["expression_depth"],
+                    "operator_count": analysis["operator_count"],
+                    "field_count": analysis["field_count"],
+                    "complexity_score": analysis["complexity_score"]
+                }
+                
+            # If parent exists, set mutation and generation details
+            generation_number = 1
+            parent_alpha_id = None
+            mutation_type = None
+            mutation_parameters = None
+            
+            if parent_obj:
+                generation_number = getattr(parent_obj, "generation_number", 1) + 1
+                parent_alpha_id = str(parent_obj.id)
+                # Determine mutation type from generator type if applicable
+                if req.engine == "Mutation Engine":
+                    mutation_type = "MUTATION"
+                elif req.engine == "Genetic Crossover Engine":
+                    mutation_type = "CROSSOVER"
+            
             expr_db = Expression(
                 project_id=req.project_id,
                 expression_text=text,
                 generator_type=req.engine.split()[0],
                 status="PENDING",
-                complexity_score=calculate_complexity_score(text),
-                research_family=family_name,
-                hypothesis=hypothesis_text,
+                complexity_score=meta.get("complexity_score", calculate_complexity_score(text)),
+                research_family=meta.get("research_family"),
+                hypothesis=meta.get("hypothesis"),
+                expected_horizon=meta.get("expected_horizon"),
+                selected_fields=meta.get("selected_fields"),
+                selected_operators=meta.get("selected_operators"),
+                operator_parameters=meta.get("operator_parameters"),
+                expected_turnover_category=meta.get("expected_turnover_category"),
+                parent_alpha_id=parent_alpha_id,
+                generation_number=generation_number,
+                mutation_type=mutation_type,
+                mutation_parameters=mutation_parameters,
+                expression_depth=meta.get("expression_depth", 1),
+                operator_count=meta.get("operator_count", 0),
+                field_count=meta.get("field_count", 0),
                 parent_id=parent_obj.id if parent_obj else None
             )
             if parent_obj:
@@ -951,6 +1019,13 @@ async def stop_simulations(request: Request, project_id: int):
         if not proj_res.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Project not found or access denied.")
 
+        # Cancel any PENDING expressions to prevent background worker from starting them
+        await db.execute(
+            update(Expression)
+            .where(Expression.project_id == project_id, Expression.status == "PENDING")
+            .values(status="ERROR")
+        )
+
         stmt = (
             select(Simulation)
             .join(Expression)
@@ -971,7 +1046,10 @@ async def stop_simulations(request: Request, project_id: int):
 async def get_analytics(project_id: int):
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(Metric.sharpe, Metric.fitness, Metric.turnover, Metric.returns, Metric.margin, Expression.generator_type)
+            select(
+                Metric.sharpe, Metric.fitness, Metric.turnover, Metric.returns, Metric.margin, 
+                Expression.generator_type, Metric.pareto_optimal, Metric.candidate_tier
+            )
             .select_from(Metric)
             .join(Simulation, Metric.simulation_id == Simulation.id)
             .join(Expression, Simulation.expression_id == Expression.id)
@@ -985,7 +1063,9 @@ async def get_analytics(project_id: int):
                 "turnover": r[2] * 100,  # format percentage
                 "returns": r[3] * 100,
                 "margin": r[4],
-                "generator": r[5]
+                "generator": r[5],
+                "pareto_optimal": r[6],
+                "candidate_tier": r[7]
             }
             for r in rows
         ]
@@ -1016,12 +1096,24 @@ async def get_passed_alphas(project_id: int):
                 Expression.research_family,
                 Expression.hypothesis,
                 Expression.parameter_sensitivity,
-                Expression.regime_performance
+                Expression.regime_performance,
+                Metric.pareto_optimal,
+                Metric.candidate_tier,
+                Metric.stability_score,
+                Metric.robustness_score,
+                Metric.diversity_score,
+                Metric.simplicity_score,
+                Metric.alpha_research_score,
+                Metric.walk_forward_mean_sharpe,
+                Metric.walk_forward_median_sharpe,
+                Metric.walk_forward_min_sharpe,
+                Metric.walk_forward_variance,
+                Metric.parameter_stability_score
             )
             .select_from(Expression)
             .join(Simulation, Expression.id == Simulation.expression_id)
             .join(Metric, Simulation.id == Metric.simulation_id)
-            .where(Expression.project_id == project_id, Expression.status == "PASSED")
+            .where(Expression.project_id == project_id)  # Enable viewing all completed stats for analysis/filtering
             .order_by(desc(Metric.sharpe))
         )
         return [
@@ -1047,7 +1139,19 @@ async def get_passed_alphas(project_id: int):
                 "research_family": p[18] if p[18] else "N/A",
                 "hypothesis": p[19] if p[19] else "N/A",
                 "parameter_sensitivity": p[20],
-                "regime_performance": p[21]
+                "regime_performance": p[21],
+                "pareto_optimal": p[22],
+                "candidate_tier": p[23],
+                "stability_score": round(p[24], 3) if p[24] is not None else 0.0,
+                "robustness_score": round(p[25], 3) if p[25] is not None else 0.0,
+                "diversity_score": round(p[26], 3) if p[26] is not None else 0.0,
+                "simplicity_score": round(p[27], 3) if p[27] is not None else 0.0,
+                "alpha_research_score": round(p[28], 3) if p[28] is not None else 0.0,
+                "walk_forward_mean_sharpe": round(p[29], 3) if p[29] is not None else 0.0,
+                "walk_forward_median_sharpe": round(p[30], 3) if p[30] is not None else 0.0,
+                "walk_forward_min_sharpe": round(p[31], 3) if p[31] is not None else 0.0,
+                "walk_forward_variance": round(p[32], 4) if p[32] is not None else 0.0,
+                "parameter_stability_score": round(p[33], 3) if p[33] is not None else 0.0
             }
             for p in result.all()
         ]

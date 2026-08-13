@@ -110,9 +110,27 @@ class SimulationWorker:
                 return
 
             from brain_farm.app.services.correlation_filter import CorrelationFilter
+            from brain_farm.app.services.field_manager import FieldManager
+            from brain_farm.app.evaluators.pre_screen import StatisticalPreScreen
+            
+            fields = await FieldManager.get_all_fields(db)
+            field_ids = [f.id for f in fields]
 
             for expr in exprs:
-                # 1. Fast local database checking against ALL expressions (not just PASSED)
+                # 1. Run local pre-screening checks
+                passed_screen, screen_reason = StatisticalPreScreen.pre_screen(expr.expression_text, field_ids)
+                if not passed_screen:
+                    expr.status = "REJECTED"
+                    log = ProjectLog(
+                        project_id=expr.project_id,
+                        level="WARNING",
+                        message=f"Pre-Screen Filter: Rejected '{expr.expression_text[:35]}...' -> {screen_reason}"
+                    )
+                    db.add(log)
+                    logger.warning(f"Pre-Screen Filter: Rejected expression {expr.id} -> {screen_reason}")
+                    continue
+
+                # 2. Fast local database checking against ALL expressions (not just PASSED)
                 dup_res = await db.execute(
                     select(Expression)
                     .where(Expression.project_id == expr.project_id)
@@ -394,11 +412,14 @@ class SimulationWorker:
                 # Compute and populate parameter sensitivity and regime Performance JSON values
                 from brain_farm.app.services.sensitivity import ParameterSensitivityTester
                 from brain_farm.app.services.correlation_filter import CorrelationFilter
+                import numpy as np
                 perturbed = ParameterSensitivityTester.generate_perturbed_expressions(expr.expression_text)
                 p_corrs = []
                 for p_expr in perturbed:
                     p_corr = CorrelationFilter.calculate_correlation(expr.expression_text, p_expr)
                     p_corrs.append({"expression": p_expr, "correlation": float(p_corr)})
+                
+                stability_score = float(np.mean([abs(c["correlation"]) for c in p_corrs])) if p_corrs else 1.0
                 
                 expr.parameter_sensitivity = {
                     "penalty": float(ParameterSensitivityTester.evaluate_sensitivity_penalty(expr.expression_text, sharpe)),
@@ -410,6 +431,67 @@ class SimulationWorker:
                     "sharpe_run_high": float(reg_m["sharpe_run_high"])
                 }
                 
+                # Robustness score combines walk forward, stability, and regime scores
+                robustness_score = float(0.40 * wf_m["walk_forward_score"] + 0.30 * stability_score + 0.30 * reg_m["regime_score"])
+                
+                diversity_score = float(comp_res["diversity_score"])
+                simplicity_score = float(comp_res["simplicity_score"])
+                
+                # Upgraded multi-factor research score
+                alpha_res = await WeightedCompositeScorer.compute_alpha_research_score(
+                    expr_text=expr.expression_text,
+                    project_id=proj.id,
+                    sharpe=sharpe,
+                    fitness=fitness,
+                    turnover=turnover,
+                    stability=stability_score,
+                    robustness=robustness_score,
+                    complexity_score=expr.complexity_score,
+                    db=db
+                )
+                alpha_research_reward = alpha_res["alpha_research_score"]
+                
+                # Evaluate against thresholds
+                sub_universe_data = data.get("subUniverseSharpe", {})
+                passed_sub_sharpe = True
+                failing_sub_universes = []
+                for sub_universe, sub_sharpe in sub_universe_data.items():
+                    sub_sharpe_val = float(sub_sharpe)
+                    if sub_sharpe_val < proj.min_sub_universe_sharpe:
+                        passed_sub_sharpe = False
+                        failing_sub_universes.append(f"{sub_universe}: {sub_sharpe_val:.2f}")
+
+                passed = (
+                    sharpe >= proj.min_sharpe and 
+                    fitness >= proj.min_fitness and 
+                    turnover <= proj.max_turnover and 
+                    margin >= proj.min_margin and
+                    passed_sub_sharpe
+                )
+                
+                # Determine Candidate Tier (0 to 6)
+                tier = 6
+                if passed:
+                    tier = 0
+                else:
+                    if (fitness >= proj.min_fitness and turnover <= proj.max_turnover and 
+                        margin >= proj.min_margin and passed_sub_sharpe and 
+                        1.10 <= sharpe < proj.min_sharpe):
+                        tier = 1
+                    elif (sharpe >= proj.min_sharpe and turnover <= proj.max_turnover and 
+                          margin >= proj.min_margin and passed_sub_sharpe and 
+                          0.85 <= fitness < proj.min_fitness):
+                        tier = 2
+                    elif (sharpe >= proj.min_sharpe and fitness >= proj.min_fitness and 
+                          turnover > proj.max_turnover):
+                        tier = 3
+                    elif (sharpe >= proj.min_sharpe and fitness >= proj.min_fitness and 
+                          turnover <= proj.max_turnover and margin >= proj.min_margin and 
+                          passed_sub_sharpe and stability_score < 0.85):
+                        tier = 4
+                    elif sharpe >= 0.80:
+                        tier = 5
+
                 # Save metrics to DB
                 metric = Metric(
                     simulation_id=sim.id,
@@ -431,33 +513,30 @@ class SimulationWorker:
                     positive_ic_ratio=ic_m["positive_ic_ratio"],
                     walk_forward_score=wf_m["walk_forward_score"],
                     regime_score=reg_m["regime_score"],
-                    correlation_score=comp_res["diversity_score"],
-                    composite_research_score=comp_res["composite_score"]
+                    correlation_score=diversity_score,
+                    composite_research_score=comp_res["composite_score"],
+                    
+                    # Upgraded fields
+                    stability_score=stability_score,
+                    robustness_score=robustness_score,
+                    diversity_score=diversity_score,
+                    simplicity_score=simplicity_score,
+                    alpha_research_score=alpha_research_reward,
+                    
+                    walk_forward_mean_sharpe=wf_m.get("mean_sharpe"),
+                    walk_forward_median_sharpe=wf_m.get("median_sharpe"),
+                    walk_forward_min_sharpe=wf_m.get("min_sharpe"),
+                    walk_forward_variance=wf_m.get("variance"),
+                    parameter_stability_score=stability_score,
+                    
+                    candidate_tier=tier
                 )
                 db.add(metric)
-                
-                # Evaluate against thresholds
-                sub_universe_data = data.get("subUniverseSharpe", {})
-                passed_sub_sharpe = True
-                failing_sub_universes = []
-                for sub_universe, sub_sharpe in sub_universe_data.items():
-                    sub_sharpe_val = float(sub_sharpe)
-                    if sub_sharpe_val < proj.min_sub_universe_sharpe:
-                        passed_sub_sharpe = False
-                        failing_sub_universes.append(f"{sub_universe}: {sub_sharpe_val:.2f}")
-
-                passed = (
-                    sharpe >= proj.min_sharpe and 
-                    fitness >= proj.min_fitness and 
-                    turnover <= proj.max_turnover and 
-                    margin >= proj.min_margin and
-                    passed_sub_sharpe
-                )
                 
                 if passed:
                     expr.status = "PASSED"
                     level = "SUCCESS"
-                    msg = f"Alpha Mined Passed! {expr.expression_text[:30]}... Sharpe: {sharpe:.2f}, Fitness: {fitness:.2f}, Turnover: {turnover:.2%}"
+                    msg = f"Alpha Mined Passed (Tier {tier})! {expr.expression_text[:30]}... Sharpe: {sharpe:.2f}, Fitness: {fitness:.2f}, Turnover: {turnover:.2%}"
                 else:
                     expr.status = "REJECTED"
                     level = "WARNING"
@@ -467,7 +546,7 @@ class SimulationWorker:
                     if turnover > proj.max_turnover: reasons.append(f"Turnover {turnover:.2%} > {proj.max_turnover}")
                     if margin < proj.min_margin: reasons.append(f"Margin {margin:.2f} bps < {proj.min_margin}")
                     if not passed_sub_sharpe: reasons.append(f"Sub-Universe (Min: {proj.min_sub_universe_sharpe}) failed: {', '.join(failing_sub_universes)}")
-                    msg = f"Alpha Rejected! {expr.expression_text[:30]}... Reason: {', '.join(reasons)}"
+                    msg = f"Alpha Rejected (Tier {tier})! {expr.expression_text[:30]}... Reason: {', '.join(reasons)}"
                 
                 log = ProjectLog(
                     project_id=proj.id,
@@ -477,10 +556,19 @@ class SimulationWorker:
                 db.add(log)
                 await db.commit()
                 
-                # Close the loop optimizer: if alpha rejected, trigger optimization recommend candidates!
-                if not passed:
-                    # Spawn optimization task in the background
+                # Recalculate Pareto Optimization Frontier and commit
+                await self._recalculate_pareto_frontier(proj.id, db)
+                await db.commit()
+                
+                # Close the loop optimizer + queue routing based on Tier
+                if tier in (1, 2):
+                    # Spawn near-miss optimization task in the background
                     asyncio.create_task(self._optimize_rejected_alpha(proj.id, expr.id, msg))
+                elif tier == 3:
+                    # High Turnover post-process smoothing
+                    asyncio.create_task(self._smooth_high_turnover_alpha(proj.id, expr.id))
+                elif tier == 6:
+                    logger.info(f"Toxic space research rejection (Tier 6) for expression ID={expr.id}")
                     
             elif status in TERMINAL_FAILURE:
                 sim.status = "ERROR"
@@ -591,3 +679,120 @@ class SimulationWorker:
                 db.add(log)
                 await db.commit()
                 logger.info(f"Auto-optimizer added new optimized Alpha into the queue: {optimized_expr}")
+
+    async def _recalculate_pareto_frontier(self, project_id: int, db):
+        """
+        Recalculates the Pareto-frontier for all COMPLETE expressions in the project.
+        Saves pareto_optimal status back to the Metric table.
+        """
+        from brain_farm.app.database.models import Metric, Simulation, Expression
+        from sqlalchemy import select
+
+        # Query all COMPLETE expressions and metrics
+        stmt = (
+            select(Expression, Metric)
+            .join(Simulation, Expression.id == Simulation.expression_id)
+            .join(Metric, Simulation.id == Metric.simulation_id)
+            .where(Expression.project_id == project_id)
+            .where(Simulation.status == "COMPLETE")
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+        if not rows:
+            return
+
+        candidates = []
+        for expr, metric in rows:
+            candidates.append({
+                "expr": expr,
+                "metric": metric,
+                "sharpe": metric.sharpe,
+                "fitness": metric.fitness,
+                "turnover": metric.turnover
+            })
+
+        for i, c1 in enumerate(candidates):
+            dominated = False
+            for j, c2 in enumerate(candidates):
+                if i == j:
+                    continue
+                # A candidate c2 dominates c1 if:
+                # 1. c2 is at least as good as c1 in all objectives
+                # 2. c2 is strictly better than c1 in at least one objective
+                c2_better_or_equal = (
+                    c2["sharpe"] >= c1["sharpe"] and
+                    c2["fitness"] >= c1["fitness"] and
+                    c2["turnover"] <= c1["turnover"]
+                )
+                c2_strictly_better = (
+                    c2["sharpe"] > c1["sharpe"] or
+                    c2["fitness"] > c1["fitness"] or
+                    c2["turnover"] < c1["turnover"]
+                )
+                if c2_better_or_equal and c2_strictly_better:
+                    dominated = True
+                    break
+
+            c1["metric"].pareto_optimal = not dominated
+
+    async def _smooth_high_turnover_alpha(self, project_id: int, expr_id: int):
+        """Processes high Sharpe, high turnover Alpha by applying smoothing."""
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Expression).where(Expression.id == expr_id)
+            )
+            expr = result.scalar_one_or_none()
+            if not expr:
+                return
+
+            from brain_farm.app.generators.transformations import apply_linear_decay
+            from brain_farm.app.evaluators.validator import FormulaValidator
+            from brain_farm.app.services.field_manager import FieldManager
+
+            smoothed_expr = apply_linear_decay(expr.expression_text, 5)
+
+            fields = await FieldManager.get_all_fields(db)
+            field_ids = [f.id for f in fields]
+
+            ok, _ = FormulaValidator.validate(smoothed_expr, field_ids)
+            if ok:
+                # Check duplication
+                dup_check = await db.execute(
+                    select(Expression)
+                    .where(Expression.project_id == project_id)
+                    .where(Expression.expression_text == smoothed_expr)
+                )
+                if not dup_check.scalar_one_or_none():
+                    from brain_farm.app.generators.expression_analyzer import analyze_expression
+                    analysis = analyze_expression(smoothed_expr, field_ids)
+
+                    new_expr = Expression(
+                        project_id=project_id,
+                        expression_text=smoothed_expr,
+                        generator_type="DecayOpt",
+                        status="PENDING",
+                        parent_id=expr.id,
+                        transformation_parent=expr.id,
+                        transformation_type="DECAY_SMOOTHING",
+                        research_family=expr.research_family,
+                        hypothesis=expr.hypothesis,
+                        expected_horizon="SHORT",
+                        selected_fields=expr.selected_fields,
+                        selected_operators=expr.selected_operators,
+                        operator_parameters=analysis["parameters"],
+                        expected_turnover_category="HIGH_RETURN_LOW_TURNOVER",
+                        expression_depth=analysis["expression_depth"],
+                        operator_count=analysis["operator_count"],
+                        field_count=analysis["field_count"],
+                        complexity_score=analysis["complexity_score"],
+                        generation_number=expr.generation_number + 1
+                    )
+                    db.add(new_expr)
+                    
+                    log = ProjectLog(
+                        project_id=project_id,
+                        level="INFO",
+                        message=f"Smoothing optimization: queued '{smoothed_expr[:30]}...' from parent '{expr.expression_text[:30]}...'"
+                    )
+                    db.add(log)
+                    await db.commit()

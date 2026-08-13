@@ -435,23 +435,24 @@
               Farming analytics reports will populate once backtests begin completing.
             </div>
 
-            <div class="grid-2col" id="analyticsChartsGrid">
+            <div class="grid-2col" id="analyticsChartsGrid"
+              style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
               <!-- Sharpe vs Turnover scatterplot -->
               <div class="card">
                 <h3>Alpha Sharpe Ratio vs Turnover</h3>
                 <div id="scatterChartWrapper" style="height: 350px;"></div>
               </div>
 
-              <!-- Fitness Densities -->
+              <!-- Fitness vs Turnover scatterplot -->
               <div class="card">
-                <h3>Fitness Score Distributions</h3>
-                <div id="fitnessChartWrapper" style="height: 350px;"></div>
+                <h3>Alpha Fitness vs Turnover</h3>
+                <div id="fitnessTurnoverChartWrapper" style="height: 350px;"></div>
               </div>
 
-              <!-- Sharpe limits by engine -->
-              <div class="card">
-                <h3>Alpha Sharpe Density Ranges</h3>
-                <div id="sharpeRangesChartWrapper" style="height: 350px;"></div>
+              <!-- Sharpe vs Fitness scatterplot -->
+              <div class="card" style="grid-column: span 2;">
+                <h3>Alpha Sharpe vs Fitness</h3>
+                <div id="sharpeFitnessChartWrapper" style="height: 350px;"></div>
               </div>
 
               <!-- Generator Performance Averages -->
@@ -500,17 +501,39 @@
               <!-- Table listing -->
               <div class="card">
                 <h3>Qualified Passed Candidate Alphas</h3>
+                <div class="filter-bar"
+                  style="display: flex; gap: 15px; margin-bottom: 12px; align-items: center; font-size: 13px;">
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="filterParetoOnly">
+                    <span>Show Pareto Optimal Only</span>
+                  </label>
+
+                  <label style="display: flex; align-items: center; gap: 6px;">
+                    <span>Tier:</span>
+                    <select id="filterTierSelect"
+                      style="background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px;">
+                      <option value="ALL">All Tiers</option>
+                      <option value="0">Tier 0 (Passed All)</option>
+                      <option value="1">Tier 1 (Sharpe Near-Miss)</option>
+                      <option value="2">Tier 2 (Fitness Near-Miss)</option>
+                      <option value="3">Tier 3 (High Sharpe, High Turnover)</option>
+                      <option value="4">Tier 4 (Promising Unstable)</option>
+                      <option value="5">Tier 5 (Moderate Failure)</option>
+                      <option value="6">Tier 6 (Strong Failure)</option>
+                    </select>
+                  </label>
+                </div>
                 <div class="table-container" style="max-height: 420px; overflow-y: auto;">
                   <table class="grid-table" id="passedAlphasTable" style="cursor: pointer;">
                     <thead>
                       <tr>
-                        <th style="width: 140px;">Alpha ID</th>
+                        <th style="width: 80px;">Alpha ID</th>
                         <th>Expression Formula</th>
-                        <th style="width: 70px;">Sharpe</th>
-                        <th style="width: 70px;">Fitness</th>
-                        <th style="width: 80px;">Turnover</th>
-                        <th style="width: 80px;">Margin</th>
-                        <th style="width: 95px;">Generator</th>
+                        <th style="width: 60px;">Sharpe</th>
+                        <th style="width: 60px;">Fitness</th>
+                        <th style="width: 70px;">Turnover</th>
+                        <th style="width: 60px;">Tier</th>
+                        <th style="width: 70px;">Pareto?</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -543,7 +566,37 @@
                       id="inspectExpression"></div>
                   </div>
 
-                  <div style="margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div style="margin-bottom: 12px;">
+                    <div
+                      style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase; margin-bottom: 4px;">
+                      Economic Hypothesis</div>
+                    <div id="inspectHypothesis"
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); font-style: italic; color: #ffd740;">
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                      <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Lineage ID
+                      </div>
+                      <strong id="inspectLineageId" style="color: var(--success);"></strong>
+                    </div>
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                      <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Parent ID
+                      </div>
+                      <strong id="inspectParentId" style="color: var(--info);"></strong>
+                    </div>
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                      <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Generation
+                      </div>
+                      <strong id="inspectGeneration" style="color: var(--warning);"></strong>
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
                     <div
                       style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
                       <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Research
@@ -553,8 +606,23 @@
                     <div
                       style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
                       <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Complexity
-                        Score</div>
+                      </div>
                       <strong id="inspectComplexity" style="color: var(--warning);"></strong>
+                    </div>
+                    <div
+                      style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                      <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Tier /
+                        Pareto</div>
+                      <strong id="inspectTierPareto" style="color: var(--primary-accent);"></strong>
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom: 12px;">
+                    <h4
+                      style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">
+                      Optimization & Evolution Trace</h4>
+                    <div id="inspectEvolutionTrace"
+                      style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 11px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4; color: var(--text-primary);">
                     </div>
                   </div>
 

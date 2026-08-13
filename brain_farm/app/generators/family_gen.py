@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from brain_farm.app.generators.base import BaseGenerator
 from brain_farm.app.generators.family_info import RESEARCH_FAMILIES
 from brain_farm.app.evaluators.validator import FormulaValidator
+from brain_farm.app.generators.expression_analyzer import analyze_expression
 
 class FamilyGenerator(BaseGenerator):
     """
@@ -16,6 +17,7 @@ class FamilyGenerator(BaseGenerator):
         if self.family_name not in RESEARCH_FAMILIES:
             self.family_name = "MOMENTUM"
         self.family_info = RESEARCH_FAMILIES[self.family_name]
+        self.generated_metadata: Dict[str, Dict[str, Any]] = {}
 
     def generate(self, count: int = 10, **kwargs) -> List[str]:
         candidates = []
@@ -31,6 +33,11 @@ class FamilyGenerator(BaseGenerator):
         
         attempts = 0
         max_attempts = count * 20
+        
+        expected_relationship = self.family_info.get("description", "")
+        turnover_range = self.family_info.get("turnover_range", (0.05, 0.40))
+        avg_turnover = sum(turnover_range) / 2.0
+        expected_turnover_category = "HIGH_RETURN_HIGH_TURNOVER" if avg_turnover > 0.40 else "HIGH_RETURN_LOW_TURNOVER"
         
         while len(candidates) < count and attempts < max_attempts:
             attempts += 1
@@ -73,7 +80,40 @@ class FamilyGenerator(BaseGenerator):
                 continue
                 
             if expr not in candidates:
-                candidates.append(expr)
+                ok, _ = FormulaValidator.validate(expr, self.allowed_fields)
+                if ok:
+                    candidates.append(expr)
+                    
+                    # Analyze and extract metrics
+                    analysis = analyze_expression(expr, self.allowed_fields)
+                    
+                    # Determine horizon based on lookback windows used
+                    max_w = max([w, w1, w2])
+                    if max_w <= 5:
+                        horizon = "SHORT"
+                    elif max_w <= 30:
+                        horizon = "MEDIUM"
+                    else:
+                        horizon = "LONG"
+                        
+                    self.generated_metadata[expr] = {
+                        "research_family": self.family_name,
+                        "hypothesis": f"{self.family_name} Hypothesis: {expected_relationship}",
+                        "expected_relationship": expected_relationship,
+                        "expected_horizon": horizon,
+                        "selected_fields": ", ".join(analysis["fields"]),
+                        "selected_operators": ", ".join(analysis["operators"]),
+                        "operator_parameters": analysis["parameters"],
+                        "construction_template": template,
+                        "expected_turnover_category": expected_turnover_category,
+                        "expected_signal_behavior": f"Statistically motivated {self.family_name} formula using {horizon} reversion/relation.",
+                        "lineage_id": None,
+                        "parent_alpha_id": None,
+                        "generation_number": 1,
+                        "expression_depth": analysis["expression_depth"],
+                        "operator_count": analysis["operator_count"],
+                        "field_count": analysis["field_count"],
+                        "complexity_score": analysis["complexity_score"]
+                    }
                 
-        # Return validator-passing candidates
-        return self.filter_valid(candidates)[:count]
+        return candidates[:count]

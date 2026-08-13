@@ -58,7 +58,21 @@ async def init_db():
                 ("lineage_id", "INTEGER"),
                 ("complexity_score", "FLOAT"),
                 ("parameter_sensitivity", "JSON"),
-                ("regime_performance", "JSON")
+                ("regime_performance", "JSON"),
+                ("expected_horizon", "VARCHAR(50)"),
+                ("selected_fields", "TEXT"),
+                ("selected_operators", "TEXT"),
+                ("operator_parameters", "JSON"),
+                ("expected_turnover_category", "VARCHAR(50)"),
+                ("parent_alpha_id", "VARCHAR(100)"),
+                ("generation_number", "INTEGER DEFAULT 1"),
+                ("mutation_type", "VARCHAR(100)"),
+                ("mutation_parameters", "JSON"),
+                ("expression_depth", "INTEGER DEFAULT 1"),
+                ("operator_count", "INTEGER DEFAULT 0"),
+                ("field_count", "INTEGER DEFAULT 0"),
+                ("transformation_parent", "INTEGER"),
+                ("transformation_type", "VARCHAR(50)")
             ]
             
             for col_name, col_type in expr_additions:
@@ -82,7 +96,23 @@ async def init_db():
                 ("walk_forward_score", "FLOAT DEFAULT 0.0"),
                 ("regime_score", "FLOAT DEFAULT 0.0"),
                 ("correlation_score", "FLOAT DEFAULT 0.0"),
-                ("composite_research_score", "FLOAT DEFAULT 0.0")
+                ("composite_research_score", "FLOAT DEFAULT 0.0"),
+                ("stability_score", "FLOAT DEFAULT 0.0"),
+                ("robustness_score", "FLOAT DEFAULT 0.0"),
+                ("diversity_score", "FLOAT DEFAULT 0.0"),
+                ("simplicity_score", "FLOAT DEFAULT 0.0"),
+                ("alpha_research_score", "FLOAT DEFAULT 0.0"),
+                ("walk_forward_mean_sharpe", "FLOAT DEFAULT 0.0"),
+                ("walk_forward_median_sharpe", "FLOAT DEFAULT 0.0"),
+                ("walk_forward_min_sharpe", "FLOAT DEFAULT 0.0"),
+                ("walk_forward_variance", "FLOAT DEFAULT 0.0"),
+                ("parameter_stability_score", "FLOAT DEFAULT 0.0"),
+                ("experiment_count", "INTEGER DEFAULT 1"),
+                ("family_experiment_count", "INTEGER DEFAULT 1"),
+                ("lineage_experiment_count", "INTEGER DEFAULT 1"),
+                ("pareto_optimal", "BOOLEAN DEFAULT 0"),
+                ("candidate_tier", "INTEGER DEFAULT 0"),
+                ("multiple_testing_adjusted_score", "FLOAT DEFAULT 0.0")
             ]
             
             for col_name, col_type in metric_additions:

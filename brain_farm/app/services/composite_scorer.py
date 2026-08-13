@@ -105,3 +105,54 @@ class WeightedCompositeScorer:
             "simplicity_score": simplicity,
             "composite_score": float(composite)
         }
+
+    @classmethod
+    async def compute_alpha_research_score(
+        cls,
+        expr_text: str,
+        project_id: int,
+        sharpe: float,
+        fitness: float,
+        turnover: float,
+        stability: float,
+        robustness: float,
+        complexity_score: float,
+        db: AsyncSession
+    ) -> dict:
+        """
+        Calculates the upgraded ALPHA_RESEARCH_SCORE:
+        0.30 * Sharpe + 0.25 * Fitness + 0.15 * Turnover + 0.10 * Stability + 0.10 * Robustness + 0.05 * Diversity + 0.05 * Simplicity
+        Also returns all normalized metrics.
+        """
+        # 1. Normalization
+        norm_sharpe = float(min(max(sharpe, 0.0), 3.0) / 3.0)
+        norm_fitness = float(min(max(fitness, 0.0), 3.0) / 3.0)
+        # Lower turnover -> higher value
+        norm_turnover = float(max(0.0, 1.0 - min(turnover, 1.0)))
+        norm_stability = float(min(max(stability, 0.0), 1.0))
+        norm_robustness = float(min(max(robustness, 0.0), 1.0))
+        
+        # Reuse existing functions for diversity and simplicity
+        norm_diversity = await cls.calculate_diversity_score(expr_text, project_id, db)
+        norm_simplicity = cls.calculate_simplicity_score(complexity_score)
+        
+        score = (
+            0.30 * norm_sharpe +
+            0.25 * norm_fitness +
+            0.15 * norm_turnover +
+            0.10 * norm_stability +
+            0.10 * norm_robustness +
+            0.05 * norm_diversity +
+            0.05 * norm_simplicity
+        )
+        
+        return {
+            "normalized_sharpe": norm_sharpe,
+            "normalized_fitness": norm_fitness,
+            "normalized_turnover": norm_turnover,
+            "normalized_stability": norm_stability,
+            "normalized_robustness": norm_robustness,
+            "normalized_diversity": norm_diversity,
+            "normalized_simplicity": norm_simplicity,
+            "alpha_research_score": float(score)
+        }
