@@ -92,82 +92,72 @@ class GroupNeutralizeNode(ASTNode):
 
 
 from brain_farm.app.generators.base import BaseGenerator
+from brain_farm.app.evaluators.signal_classifier import SignalQualityClassifier, ResearchQualityScorer
+from brain_farm.app.evaluators.pre_screen import StatisticalPreScreen
 
 class ASTGenerator(BaseGenerator):
-    """Generates expressions by building a recursive tree structure up to a max depth."""
+    """
+    Generates structured, hypothesis-driven alpha signals via multi-stage signal construction:
+    1. Factor selection (Price / Volume / Fundamental)
+    2. Temporal structure / Deviation (ts_delta, ts_decay_linear, ts_zscore, ts_mean, ts_rank)
+    3. Cross-sectional normalization / ranking (rank)
+    4. Optional group neutralization (subindustry / industry)
+    """
 
     def __init__(self, allowed_fields: List[str], max_depth: int = 3):
         super().__init__(allowed_fields)
-        self.max_depth = max(2, min(max_depth, 5))  # Keep depth within 2-5 for complexity constraints
+        self.max_depth = max(2, min(max_depth, 5))
 
-    def _generate_node(self, current_depth: int) -> ASTNode:
-        fields = self.allowed_fields or ["close", "open", "volume"]
-        
-        # Base case: reach max depth or randomly decide to return a terminal Field or Constant
-        if current_depth >= self.max_depth or (current_depth > 1 and random.random() < 0.35):
-            if random.random() < 0.85:
-                return FieldNode(random.choice(fields))
-            else:
-                return ConstantNode(random.choice([0.1, 0.5, 1, 2, 5]))
+    def _generate_predictive_signal(self) -> str:
+        fields = self.allowed_fields or ["close", "open", "volume", "vwap"]
+        f1 = random.choice(fields)
+        f2 = random.choice(fields)
+        w1 = random.choice([5, 10, 20, 30, 60])
+        w2 = random.choice([5, 10, 20])
 
-        # Select node category structure:
-        # 1. Unary operator (rank, abs, log, sign)
-        # 2. Binary operator (+, -, *, /, ts_corr)
-        # 3. Window lookback operator (ts_zscore, ts_decay_linear, ts_rank, ts_delta, ts_mean, ts_std_dev)
-        # 4. Neutralization (group_neutralize)
-        
-        choices = ["unary", "binary", "window", "neutralize"]
-        # Reduce neutralization choice if already neutralized in call stack
-        choice = random.choice(choices)
+        pattern = random.choice([
+            "momentum_decay",
+            "mean_reversion_zscore",
+            "relative_spread",
+            "volume_price_correlation",
+            "normalized_trend",
+            "dual_lookback_oscillator"
+        ])
 
-        if choice == "unary":
-            op = random.choice(["rank", "abs", "log", "sign"])
-            child = self._generate_node(current_depth + 1)
-            return UnaryOpNode(op, child)
-            
-        elif choice == "binary":
-            op = random.choice(["+", "-", "*", "/", "ts_corr", "ts_covariance"])
-            left = self._generate_node(current_depth + 1)
-            # For arithmetic right node, can be field or simple constant
-            if op in ["ts_corr", "ts_covariance"]:
-                right = self._generate_node(current_depth + 1)
-                # Ensure the last argument of ts_corr is a window
-                window = random.choice([10, 20, 40])
-                # Special construction: ts_corr needs 3 parameters (left, right, window)
-                # But since it is modelled in WQ as ts_corr(x, y, d), we can wrap it:
-                return WindowOpNode(f"ts_corr({left.to_string()}", right, window)
-            else:
-                right = self._generate_node(current_depth + 1)
-                return BinaryOpNode(op, left, right)
-                
-        elif choice == "window":
-            op = random.choice(["ts_zscore", "ts_decay_linear", "ts_rank", "ts_delta", "ts_mean", "ts_std_dev"])
-            child = self._generate_node(current_depth + 1)
-            window = random.choice([5, 10, 20, 30, 60])
-            return WindowOpNode(op, child, window)
-            
-        else: # neutralize
-            group = random.choice(["subindustry", "industry", "sector"])
-            child = self._generate_node(current_depth + 1)
-            return GroupNeutralizeNode(child, group)
+        if pattern == "momentum_decay":
+            inner = f"rank(ts_delta({f1}, {w1}))"
+            expr = f"ts_decay_linear({inner}, {w2})"
+        elif pattern == "mean_reversion_zscore":
+            expr = f"-rank(ts_zscore({f1}, {w1}))"
+        elif pattern == "relative_spread":
+            expr = f"rank({f1} / ts_mean({f1}, {w1}) - 1)"
+        elif pattern == "volume_price_correlation":
+            expr = f"ts_corr({f1}, {f2}, {w1})"
+        elif pattern == "dual_lookback_oscillator":
+            expr = f"rank(ts_mean({f1}, {w2}) / ts_mean({f1}, {w1}) - 1)"
+        else: # normalized_trend
+            expr = f"-ts_rank(ts_decay_linear({f1}, {w2}), {w1})"
+
+        # Controlled Neutralization (35% probability, strictly on outer ranked composite)
+        if random.random() < 0.35:
+            expr = f"group_neutralize({expr}, subindustry)"
+
+        return expr
 
     def generate(self, count: int = 10, **kwargs) -> List[str]:
         candidates = []
-        max_attempts = count * 20
+        max_attempts = count * 25
         attempts = 0
         
         while len(candidates) < count and attempts < max_attempts:
             attempts += 1
-            node = self._generate_node(1)
-            expr = node.to_string()
+            expr = self._generate_predictive_signal()
             
-            # Additional structural corrections
-            # Fix ts_corr representation if nested weirdly
-            if "ts_corr(" in expr and not expr.endswith(")"):
-                # Clean up nested formatting
-                pass
-
             if expr not in candidates:
-                candidates.append(expr)
+                # Pre-screen check
+                passed, _ = StatisticalPreScreen.pre_screen(expr, self.allowed_fields)
+                if passed:
+                    candidates.append(expr)
 
-        return self.filter_valid(candidates)[:count]
+        return candidates[:count]
+

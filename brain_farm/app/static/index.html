@@ -51,6 +51,8 @@
           <li><button class="nav-btn" data-view="project-logs-tab"><i data-lucide="file-text"></i> Diagnostic
               Logs</button>
           </li>
+          <li><button class="nav-btn" data-view="ai-lab"><i data-lucide="sparkles"></i> AI Research Lab</button></li>
+          <li><button class="nav-btn" data-view="ai-settings"><i data-lucide="sliders"></i> AI Services</button></li>
           <li><button class="nav-btn" data-view="ai-assistant"><i data-lucide="bot"></i> AI Assistant</button></li>
         </ul>
       </nav>
@@ -373,7 +375,7 @@
                 <div class="stat-label">Pending Queue Length</div>
               </div>
               <div class="card stat-card">
-                <div class="stat-icon"><i data-lucide="loader-2" class="spin"></i></div>
+                <div class="stat-icon" id="statQueueRunningIconWrapper"><i id="statQueueRunningIcon" data-lucide="activity"></i></div>
                 <div class="stat-number" id="statQueueRunning">0</div>
                 <div class="stat-label">Running Simulations</div>
               </div>
@@ -862,49 +864,238 @@
           </div>
         </section>
 
-        <!-- View 8: AI Assistant -->
+        <!-- View: AI Research Lab -->
+        <section id="view-ai-lab" class="view-panel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h2 style="margin: 0; font-size: 22px; font-weight: 700;">AI Research Lab</h2>
+              <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Adaptive quantitative research synthesis, hypothesis generation, and adversarial review.</p>
+            </div>
+            <div id="aiLabStatusBadge">
+              <span class="status-pill queued" id="aiLabPill" style="font-size: 12px; padding: 6px 14px;">
+                <i data-lucide="circle-dot"></i> <span id="aiLabPillText">Checking AI Status...</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Top Grid: Director & Hypothesis -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 24px;">
+            
+            <!-- Card 1: AI Research Director -->
+            <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--primary-accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <i data-lucide="compass"></i> AI Research Director
+                </h3>
+                <button class="btn btn-secondary btn-sm" id="btnRefreshDirectorPlan" style="font-size: 11px; padding: 4px 10px;">
+                  <i data-lucide="refresh-cw"></i> Refresh Plan
+                </button>
+              </div>
+
+              <div id="directorSummaryBox" style="background: var(--bg-primary); border-radius: 6px; padding: 14px; margin-bottom: 14px; font-size: 12px; line-height: 1.6; color: var(--text-primary); border-left: 3px solid var(--primary-accent);">
+                Loading AI Director macro strategic allocation...
+              </div>
+
+              <div style="margin-bottom: 12px;">
+                <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Recommended Budget Allocation</label>
+                <div id="directorAllocationBars" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;"></div>
+              </div>
+            </div>
+
+            <!-- Card 2: AI Hypothesis Generator -->
+            <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--primary-accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <i data-lucide="lightbulb"></i> Hypothesis Engine
+                </h3>
+                <span class="badge" style="background: var(--accent-faded); color: var(--primary-accent); border: 1px solid var(--primary-accent);">Structured JSON</span>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+                <select id="aiHypothesisFamilySelect" style="flex: 1; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12px;">
+                  <option value="VALUE">VALUE Family</option>
+                  <option value="MOMENTUM">MOMENTUM Family</option>
+                  <option value="QUALITY">QUALITY Family</option>
+                  <option value="REVERSAL">REVERSAL Family</option>
+                  <option value="ANALYST">ANALYST Family</option>
+                  <option value="GROWTH">GROWTH Family</option>
+                  <option value="VOLATILITY">VOLATILITY Family</option>
+                </select>
+                <button class="btn btn-primary" id="btnGenerateHypothesis" style="padding: 0 16px; font-size: 12px;">
+                  <i data-lucide="sparkles"></i> Generate
+                </button>
+              </div>
+
+              <div id="aiHypothesisDisplayBox" style="background: var(--bg-primary); border-radius: 6px; padding: 14px; min-height: 110px; margin-bottom: 14px; font-size: 12px; line-height: 1.5; color: var(--text-primary);">
+                <p class="placeholder-text" style="margin: 0;">Click Generate to synthesize an economic research hypothesis for the selected family.</p>
+              </div>
+
+              <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-secondary" id="btnQueueHypothesisAlphas" style="display: none; font-size: 12px;">
+                  <i data-lucide="play"></i> Synthesize & Queue Alphas
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Bottom Grid: Adversarial Critic & Persistent Memory -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+            
+            <!-- Card 3: Adversarial Alpha Critic -->
+            <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+              <h3 style="font-size: 15px; font-weight: 600; color: var(--primary-accent); margin: 0 0 14px 0; display: flex; align-items: center; gap: 8px;">
+                <i data-lucide="shield-alert"></i> Adversarial Alpha Critic
+              </h3>
+
+              <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <input type="text" id="criticFormulaInput" placeholder="Enter formula to stress-test e.g. rank(ts_delta(close, 5))" style="flex: 1; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12px;">
+                <button class="btn btn-secondary" id="btnRunCriticReview" style="padding: 0 16px; font-size: 12px;">
+                  <i data-lucide="search"></i> Review
+                </button>
+              </div>
+
+              <div id="criticResultBox" style="background: var(--bg-primary); border-radius: 6px; padding: 14px; min-height: 120px; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
+                <p class="placeholder-text" style="margin: 0;">Enter an expression or select a candidate to analyze for data-mining bias, parameter cliffs, or overfitting risks.</p>
+              </div>
+            </div>
+
+            <!-- Card 4: Empirical Research Memory Summary -->
+            <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--primary-accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <i data-lucide="database"></i> Research Memory Efficacy
+                </h3>
+                <button class="btn btn-secondary btn-sm" id="btnRefreshMemory" style="font-size: 11px; padding: 4px 10px;">
+                  <i data-lucide="refresh-cw"></i> Refresh
+                </button>
+              </div>
+
+              <div style="overflow-x: auto;">
+                <table class="table" style="width: 100%; font-size: 12px;">
+                  <thead>
+                    <tr>
+                      <th>Family</th>
+                      <th>Experiments</th>
+                      <th>Pass Rate</th>
+                      <th>Promising Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody id="researchMemoryTableBody">
+                    <tr><td colspan="4" class="text-center text-muted">No empirical records yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- View: AI Services Settings -->
+        <section id="view-ai-settings" class="view-panel">
+          <div style="margin-bottom: 20px;">
+            <h2 style="margin: 0; font-size: 22px; font-weight: 700;">AI Services & Provider Settings</h2>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Configure optional AI provider credentials and toggle specialized research capabilities.</p>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px;">
+            
+            <!-- Provider Configuration -->
+            <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 22px;">
+              <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                <i data-lucide="key"></i> AI Provider & API Key
+              </h3>
+
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label for="aiSettingsProviderSelect">AI Provider</label>
+                <select id="aiSettingsProviderSelect" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;">
+                  <option value="gemini">Google Gemini (Recommended / Fast)</option>
+                  <option value="openai">OpenAI (GPT-4o-mini / GPT-4o)</option>
+                </select>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label for="aiSettingsApiKeyInput">API Key (Stored Server-Side Encrypted)</label>
+                <input type="password" id="aiSettingsApiKeyInput" placeholder="Paste your API key here (leave blank to preserve existing key)…" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;">
+              </div>
+
+              <div class="form-group" style="margin-bottom: 18px;">
+                <label for="aiSettingsModelInput">Model Name</label>
+                <input type="text" id="aiSettingsModelInput" placeholder="e.g. gemini-1.5-flash or gpt-4o-mini" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;">
+              </div>
+
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="btn btn-secondary" id="btnValidateAiSettingsKey">
+                  <i data-lucide="check-circle-2"></i> Validate Key
+                </button>
+                <button class="btn btn-primary" id="btnSaveAiSettings">
+                  <i data-lucide="save"></i> Save Settings
+                </button>
+              </div>
+
+              <div id="aiSettingsStatusBox" style="margin-top: 16px; padding: 12px; border-radius: 6px; background: var(--bg-primary); border-left: 3px solid var(--text-secondary); font-size: 12px; line-height: 1.5;">
+                <span id="aiSettingsStatusMsg">AI features are optional. Dumbo-Tron continues to operate normally without an AI provider.</span>
+              </div>
+            </div>
+
+            <!-- Feature Flags & Usage Tracking -->
+            <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 22px;">
+              <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                <i data-lucide="toggle-left"></i> AI Feature Toggles
+              </h3>
+
+              <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; font-size: 13px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                  <input type="checkbox" id="flagHypothesis" checked> <span>Hypothesis Generation</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                  <input type="checkbox" id="flagFailure" checked> <span>Failure & Weak-Signal Analysis</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                  <input type="checkbox" id="flagNearMiss" checked> <span>Near-Miss Surgical Optimization</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                  <input type="checkbox" id="flagTurnover" checked> <span>Turnover Dampening & Smoothing</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                  <input type="checkbox" id="flagDirector" checked> <span>AI Research Director & Macro Allocation</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                  <input type="checkbox" id="flagCritic" checked> <span>Adversarial Alpha Critic</span>
+                </label>
+              </div>
+
+              <h4 style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 10px;">
+                Usage & Call Budget
+              </h4>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px;">
+                  <div style="color: var(--text-secondary);">Calls Today</div>
+                  <div id="aiDailyCallsVal" style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-top: 2px;">0 / 200</div>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px;">
+                  <div style="color: var(--text-secondary);">Estimated Cost</div>
+                  <div id="aiEstimatedCostVal" style="font-size: 16px; font-weight: 700; color: var(--primary-accent); margin-top: 2px;">$0.0000</div>
+                </div>
+              </div>
+
+              <div style="margin-top: 14px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                <i data-lucide="shield-check" style="width: 12px; height: 12px; vertical-align: middle;"></i>
+                Your API key is used exclusively for quantitative formula analysis. Dumbo-Tron never transmits your WorldQuant BRAIN password, 2FA OTP, or session tokens to AI services.
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- View: AI Assistant Chat -->
         <section id="view-ai-assistant" class="view-panel">
           <h2>AI Assistant</h2>
 
-          <!-- API Config -->
-          <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 24px; flex-wrap: wrap;">
-            <div class="form-group" style="margin:0; min-width: 160px;">
-              <label for="aiProviderSelect">Provider</label>
-              <select id="aiProviderSelect">
-                <option value="gemini">Google Gemini</option>
-                <option value="openai">OpenAI</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0; flex:1; min-width: 260px;">
-              <label for="aiApiKeyInput">API Key</label>
-              <input type="password" id="aiApiKeyInput" placeholder="Paste your API key here…">
-            </div>
-            <div class="form-group" style="margin:0; min-width: 160px;">
-              <label for="aiModelInput">Model</label>
-              <input type="text" id="aiModelInput" placeholder="e.g. gemini-1.5-flash">
-            </div>
-            <button class="btn btn-secondary" id="btnSaveAiKey" style="margin-bottom:0; flex-shrink:0;">
-              <i data-lucide="save"></i> Save Config
-            </button>
-            <button class="btn btn-secondary" id="btnClearAiChat"
-              style="margin-bottom:0; flex-shrink:0; color: var(--error);">
-              <i data-lucide="trash-2"></i> Clear Chat
-            </button>
-          </div>
-
-          <div id="aiSavedBadge" style="display:none; margin-bottom:14px;">
-            <span class="status-pill complete" style="font-size:12px; padding: 4px 10px;">
-              <i data-lucide="check-circle-2"
-                style="width:12px;height:12px;vertical-align:middle;margin-right:4px;"></i>
-              Config saved
-            </span>
-          </div>
-
           <!-- Chat window -->
           <div id="aiChatWindow"
-            style="background: var(--bg-primary); border-radius: 8px; padding: 16px; min-height: 340px; max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; font-size: 13px;">
-            <p class="placeholder-text" id="aiChatPlaceholder">Configure your API key above and start a conversation.
-            </p>
+            style="background: var(--bg-primary); border-radius: 8px; padding: 16px; min-height: 380px; max-height: 58vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; font-size: 13px;">
+            <p class="placeholder-text" id="aiChatPlaceholder">Ask the AI Assistant anything about quantitative alpha formulas, operators, or research strategies.</p>
           </div>
 
           <!-- Input row -->
@@ -969,6 +1160,66 @@
         <button class="btn btn-secondary" id="btnCopyDetailFormula" style="display: none;"><i data-lucide="copy"></i>
           Copy Formula</button>
         <button class="btn btn-primary" id="btnCloseLogDetailBtn">Close</button>
+      </div>
+  <!-- Modal: Zero-Metric Simulation Diagnostics Modal -->
+  <div id="simDiagnosticsModal" class="modal"
+    style="display: none; position: fixed; z-index: 1002; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.85); align-items: center; justify-content: center;">
+    <div class="modal-content"
+      style="background-color: var(--bg-card); margin: auto; padding: 26px; border: 1px solid var(--border-color); width: 85%; max-width: 720px; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.7); position: relative;">
+      <span class="close-modal" id="closeSimDiagnosticsModal" style="position: absolute; right: 20px; top: 16px; cursor: pointer; font-size: 24px;">&times;</span>
+      <h2 style="margin-top: 0; color: var(--primary-accent); display: flex; align-items: center; gap: 8px; font-size: 18px;">
+        <i data-lucide="activity"></i> Simulation Diagnostics & Zero-Metric Inspection
+      </h2>
+      <hr class="divider" style="margin: 12px 0 16px 0;">
+      
+      <!-- Formula & Signal Classification Bar -->
+      <div style="background: var(--bg-primary); padding: 14px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Expression Formula</span>
+          <div style="display: flex; gap: 6px;">
+            <span id="diagSignalTypeBadge" class="badge" style="background: var(--accent-faded); color: var(--primary-accent); border: 1px solid var(--primary-accent);">RAW_SIGNAL</span>
+            <span id="diagCategoryBadge" class="badge" style="background: rgba(255, 82, 82, 0.15); color: var(--error); border: 1px solid var(--error);">NO_VALID_METRICS</span>
+          </div>
+        </div>
+        <div id="diagFormulaText" style="font-family: monospace; font-size: 13px; color: var(--text-primary); word-break: break-all;">-</div>
+      </div>
+
+      <!-- 4 Decoupled Status Cards -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;">
+        <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color);">
+          <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Remote Status</div>
+          <div id="diagSimStatus" style="font-size: 12px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">COMPLETE</div>
+        </div>
+        <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color);">
+          <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Portfolio Status</div>
+          <div id="diagPortfolioStatus" style="font-size: 12px; font-weight: 700; color: var(--warning); margin-top: 4px;">EMPTY</div>
+        </div>
+        <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color);">
+          <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Metrics Status</div>
+          <div id="diagMetricStatus" style="font-size: 12px; font-weight: 700; color: var(--error); margin-top: 4px;">UNAVAILABLE</div>
+        </div>
+        <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color);">
+          <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Evaluation</div>
+          <div id="diagEvaluationStatus" style="font-size: 11px; font-weight: 700; color: #ffa000; margin-top: 4px;">TECHNICAL FAILURE</div>
+        </div>
+      </div>
+
+      <!-- Diagnostic Message & Recommendation -->
+      <div id="diagDetailMessageCard" style="background: var(--bg-primary); padding: 14px; border-radius: 6px; border-left: 3px solid var(--error); margin-bottom: 14px; font-size: 12px; line-height: 1.5; color: var(--text-primary);">
+        Loading diagnostic details...
+      </div>
+
+      <!-- Raw Response Inspection Box -->
+      <div id="diagRawStructureWrapper" style="background: var(--bg-primary); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 18px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="const el = document.getElementById('diagRawStructureContent'); el.style.display = el.style.display === 'none' ? 'block' : 'none';">
+          <span style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Sanitized Response Keys & Parser Path <span id="diagParserPathLabel" style="color: var(--primary-accent); margin-left: 6px;"></span></span>
+          <span style="font-size: 11px; color: var(--text-secondary);">Toggle Raw Details ▾</span>
+        </div>
+        <pre id="diagRawStructureContent" style="display: none; margin-top: 10px; font-size: 11px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; overflow-x: auto; max-height: 180px;"></pre>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-primary" id="btnCloseSimDiagnosticsBtn">Close</button>
       </div>
     </div>
   </div>

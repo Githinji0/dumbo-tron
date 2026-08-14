@@ -3,6 +3,8 @@ from typing import List, Dict, Any
 from brain_farm.app.generators.base import BaseGenerator
 from brain_farm.app.generators.family_info import RESEARCH_FAMILIES
 from brain_farm.app.evaluators.validator import FormulaValidator
+from brain_farm.app.evaluators.pre_screen import StatisticalPreScreen
+from brain_farm.app.evaluators.signal_classifier import SignalQualityClassifier, ResearchQualityScorer
 from brain_farm.app.generators.expression_analyzer import analyze_expression
 
 class FamilyGenerator(BaseGenerator):
@@ -78,10 +80,9 @@ class FamilyGenerator(BaseGenerator):
                     
             if has_forbidden:
                 continue
-                
             if expr not in candidates:
-                ok, _ = FormulaValidator.validate(expr, self.allowed_fields)
-                if ok:
+                passed, _ = StatisticalPreScreen.pre_screen(expr, self.allowed_fields, family=self.family_name)
+                if passed:
                     candidates.append(expr)
                     
                     # Analyze and extract metrics
@@ -96,17 +97,23 @@ class FamilyGenerator(BaseGenerator):
                     else:
                         horizon = "LONG"
                         
+                    hypo_text = f"{self.family_name} Hypothesis: {expected_relationship}"
+                    quality_res = ResearchQualityScorer.compute_score(expr, hypo_text, self.family_name)
+
                     self.generated_metadata[expr] = {
                         "research_family": self.family_name,
-                        "hypothesis": f"{self.family_name} Hypothesis: {expected_relationship}",
+                        "hypothesis": hypo_text,
                         "expected_relationship": expected_relationship,
                         "expected_horizon": horizon,
+                        "signal_type": quality_res["signal_type"],
+                        "generation_reason": quality_res["classification_reason"],
+                        "research_quality_score": quality_res["research_quality_score"],
                         "selected_fields": ", ".join(analysis["fields"]),
                         "selected_operators": ", ".join(analysis["operators"]),
                         "operator_parameters": analysis["parameters"],
                         "construction_template": template,
                         "expected_turnover_category": expected_turnover_category,
-                        "expected_signal_behavior": f"Statistically motivated {self.family_name} formula using {horizon} reversion/relation.",
+                        "expected_signal_behavior": f"Statistically motivated {self.family_name} formula using {horizon} horizon.",
                         "lineage_id": None,
                         "parent_alpha_id": None,
                         "generation_number": 1,

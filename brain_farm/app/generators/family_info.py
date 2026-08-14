@@ -270,3 +270,6 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
         ]
     }
 }
+
+FAMILIES: List[str] = list(RESEARCH_FAMILIES.keys())
+FAMILY_CONFIGS: Dict[str, Dict[str, Any]] = RESEARCH_FAMILIES

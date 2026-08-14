@@ -50,8 +50,8 @@ def test_priority_allocation():
             db.add_all([sim1, sim2])
             await db.flush()
             
-            m1 = Metric(simulation_id=sim1.id, sharpe=2.5, fitness=2.0)
-            m2 = Metric(simulation_id=sim2.id, sharpe=3.1, fitness=2.4)
+            m1 = Metric(simulation_id=sim1.id, sharpe=2.5, fitness=2.0, turnover=0.25, returns=0.15, margin=5.0)
+            m2 = Metric(simulation_id=sim2.id, sharpe=3.1, fitness=2.4, turnover=0.20, returns=0.18, margin=6.0)
             db.add_all([m1, m2])
             await db.commit()
             

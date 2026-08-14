@@ -12,11 +12,15 @@ from sqlalchemy import select, desc, func, update
 from sqlalchemy.orm import selectinload
 
 from brain_farm.app.database.session import make_session_factory, init_db
-from brain_farm.app.database.models import User, Project, Expression, Simulation, Metric, ProjectLog
+from brain_farm.app.database.models import (
+    User, Project, Expression, Simulation, Metric, ProjectLog,
+    AISetting, AIUsageLog, ResearchMemoryEntry
+)
 from brain_farm.app.services.brain_client import BrainClient
 from brain_farm.app.services.worker import SimulationWorker
 from brain_farm.app.services.field_manager import FieldManager, DEFAULT_FIELDS
 from brain_farm.app.evaluators.validator import FormulaValidator
+from brain_farm.app.ai.manager import ai_manager
 
 # Generators
 from brain_farm.app.generators.template import TemplateGenerator
@@ -119,6 +123,23 @@ class RegistrySubmitRequest(BaseModel):
 
 class RegistrySubmitAllRequest(BaseModel):
     project_id: int
+
+class AIConfigRequest(BaseModel):
+    provider: str = "gemini"
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    is_enabled: bool = True
+    features: Optional[Dict[str, bool]] = None
+    max_daily_budget_calls: Optional[int] = 200
+
+class AIValidateRequest(BaseModel):
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+class AIChatRequest(BaseModel):
+    message: str
+    context: Optional[Dict[str, Any]] = None
 
 # Endpoints
 @app.get("/")
@@ -953,36 +974,66 @@ async def get_queue_stats(project_id: int):
         )
         active_cnt = res_active.scalar() or 0
         
+        # 3. Needs Auth / Paused count
+        res_auth = await db.execute(
+            select(func.count()).select_from(Simulation)
+            .join(Expression, Simulation.expression_id == Expression.id)
+            .where(
+                Expression.project_id == project_id,
+                Simulation.status == "NEEDS_AUTH"
+            )
+        )
+        needs_auth_cnt = res_auth.scalar() or 0
+        
         # Details grid
         result_sims = await db.execute(
-            select(Simulation.brain_simulation_id, Expression.expression_text, Simulation.status, Simulation.updated_at, Simulation.error_message)
+            select(
+                Simulation.id,
+                Simulation.brain_simulation_id, 
+                Expression.expression_text, 
+                Simulation.status, 
+                Simulation.updated_at, 
+                Simulation.error_message,
+                Expression.signal_type,
+                Expression.diagnostic_category,
+                Simulation.diagnostic_details
+            )
             .select_from(Simulation)
             .join(Expression, Simulation.expression_id == Expression.id)
             .where(Expression.project_id == project_id)
             .order_by(desc(Simulation.updated_at))
-            .limit(25)
+            .limit(50)
         )
         sim_list = []
         for s in result_sims.all():
-            sim_id = s[0] if s[0] else "N/A"
-            expr_text = s[1]
-            status_val = s[2]
-            updated_at = s[3].strftime("%H:%M:%S") if s[3] else "N/A"
-            raw_msg = s[4]
+            db_sim_id = s[0]
+            sim_id = s[1] if s[1] else f"sim-{db_sim_id}"
+            expr_text = s[2]
+            status_val = s[3]
+            updated_at = s[4].strftime("%H:%M:%S") if s[4] else "N/A"
+            raw_msg = s[5]
+            sig_type = s[6] or "RAW_SIGNAL"
+            diag_cat = s[7] or ("NO_VALID_METRICS" if status_val == "NO_VALID_METRICS" else ("SIMULATION_ERROR" if status_val == "ERROR" else "NORMAL"))
+            diag_details = s[8] or {}
             
-            c_info = classify_error_string(raw_msg) if status_val == "ERROR" else {"category": "NORMAL", "detail": raw_msg or "Normal"}
+            c_info = classify_error_string(raw_msg) if status_val == "ERROR" else {"category": diag_cat, "detail": raw_msg or "Normal"}
             sim_list.append({
+                "db_id": db_sim_id,
                 "sim_id": sim_id,
                 "expression": expr_text,
                 "status": status_val,
                 "last_checked": updated_at,
-                "category": c_info.get("category", "NORMAL"),
+                "signal_type": sig_type,
+                "diagnostic_category": diag_cat,
+                "diagnostic_details": diag_details,
+                "category": c_info.get("category", diag_cat),
                 "message": c_info.get("detail", "Normal")
             })
         
         return {
             "pending_count": pending_cnt,
             "running_count": active_cnt,
+            "needs_auth_count": needs_auth_cnt,
             "concurrency_limit": 5,
             "simulations": sim_list
         }
@@ -1278,15 +1329,17 @@ async def get_analytics(project_id: int):
             .join(Simulation, Metric.simulation_id == Simulation.id)
             .join(Expression, Simulation.expression_id == Expression.id)
             .where(Expression.project_id == project_id)
+            .where(Metric.has_valid_metrics == True)
+            .where(Metric.sharpe.isnot(None))
         )
         rows = result.all()
         return [
             {
                 "sharpe": r[0],
                 "fitness": r[1],
-                "turnover": r[2] * 100,  # format percentage
-                "returns": r[3] * 100,
-                "margin": r[4],
+                "turnover": (r[2] * 100) if r[2] is not None else 0.0,
+                "returns": (r[3] * 100) if r[3] is not None else 0.0,
+                "margin": r[4] if r[4] is not None else 0.0,
                 "generator": r[5],
                 "pareto_optimal": r[6],
                 "candidate_tier": r[7]
@@ -1332,22 +1385,32 @@ async def get_passed_alphas(project_id: int):
                 Metric.walk_forward_median_sharpe,
                 Metric.walk_forward_min_sharpe,
                 Metric.walk_forward_variance,
-                Metric.parameter_stability_score
+                Metric.parameter_stability_score,
+                Metric.has_valid_metrics,
+                Expression.signal_type,
+                Expression.diagnostic_category,
+                Expression.research_quality_score,
+                Simulation.id,
+                Expression.portfolio_status,
+                Expression.metrics_status,
+                Expression.evaluation_status,
+                Expression.parser_status,
+                Expression.failure_reason
             )
             .select_from(Expression)
             .join(Simulation, Expression.id == Simulation.expression_id)
-            .join(Metric, Simulation.id == Metric.simulation_id)
-            .where(Expression.project_id == project_id)  # Enable viewing all completed stats for analysis/filtering
+            .outerjoin(Metric, Simulation.id == Metric.simulation_id)
+            .where(Expression.project_id == project_id)
             .order_by(desc(Metric.sharpe))
         )
         return [
             {
                 "alpha_id": p[1] if p[1] else "Pending Registry",
                 "expression": p[0],
-                "sharpe": round(p[2], 3),
-                "fitness": round(p[3], 3),
-                "turnover": round(p[4] * 100, 2),
-                "margin": round(p[5], 3),
+                "sharpe": round(p[2], 3) if p[2] is not None else None,
+                "fitness": round(p[3], 3) if p[3] is not None else None,
+                "turnover": round(p[4] * 100, 2) if p[4] is not None else None,
+                "margin": round(p[5], 3) if p[5] is not None else None,
                 "generator": p[6],
                 "db_id": p[7],
                 "rank_ic": round(p[8], 4) if p[8] is not None else 0.0,
@@ -1375,10 +1438,77 @@ async def get_passed_alphas(project_id: int):
                 "walk_forward_median_sharpe": round(p[30], 3) if p[30] is not None else 0.0,
                 "walk_forward_min_sharpe": round(p[31], 3) if p[31] is not None else 0.0,
                 "walk_forward_variance": round(p[32], 4) if p[32] is not None else 0.0,
-                "parameter_stability_score": round(p[33], 3) if p[33] is not None else 0.0
+                "parameter_stability_score": round(p[33], 3) if p[33] is not None else 0.0,
+                "has_valid_metrics": bool(p[34]) if p[34] is not None else False,
+                "signal_type": p[35] or "RAW_SIGNAL",
+                "diagnostic_category": p[36] or "NORMAL",
+                "research_quality_score": round(p[37], 1) if p[37] is not None else 0.0,
+                "sim_id": p[38],
+                "portfolio_status": p[39] or ("PORTFOLIO_AVAILABLE" if bool(p[34]) else "PORTFOLIO_EMPTY"),
+                "metrics_status": p[40] or ("METRICS_AVAILABLE" if bool(p[34]) else "METRICS_MISSING"),
+                "evaluation_status": p[41] or ("EVALUATED" if bool(p[34]) else "TECHNICAL_FAILURE"),
+                "parser_status": p[42] or "NONE",
+                "failure_reason": p[43]
             }
             for p in result.all()
         ]
+
+@app.get("/api/simulations/{sim_id}/diagnostics")
+async def get_simulation_diagnostics(sim_id: int):
+    """Returns complete diagnostic breakdown for a simulation task."""
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            select(Simulation)
+            .options(selectinload(Simulation.expression), selectinload(Simulation.metrics))
+            .where(Simulation.id == sim_id)
+        )
+        sim = res.scalar_one_or_none()
+        if not sim:
+            raise HTTPException(status_code=404, detail="Simulation not found")
+
+        expr = sim.expression
+        metric = sim.metrics
+        has_metrics = bool(metric and metric.has_valid_metrics and metric.sharpe is not None)
+
+        details = sim.diagnostic_details or {
+            "simulation_status": sim.remote_status or sim.status,
+            "brain_response_status": sim.remote_status or ("COMPLETE" if sim.status == "COMPLETE" else sim.status),
+            "parser_status": expr.parser_status or ("VALID" if has_metrics else ("FAILED_TO_EXTRACT_METRICS" if sim.status == "NO_VALID_METRICS" else "API_ERROR")),
+            "portfolio_status": expr.portfolio_status or ("PORTFOLIO_AVAILABLE" if has_metrics else "PORTFOLIO_EMPTY"),
+            "metrics_status": expr.metrics_status or ("METRICS_AVAILABLE" if has_metrics else "METRICS_MISSING"),
+            "evaluation_status": expr.evaluation_status or ("EVALUATED" if has_metrics else "TECHNICAL_FAILURE"),
+            "result_availability": bool(sim.status in ("COMPLETE", "NO_VALID_METRICS")),
+            "portfolio_availability": bool(sim.brain_alpha_id or (expr.portfolio_status == "PORTFOLIO_AVAILABLE")),
+            "metric_availability": has_metrics,
+            "trade_availability": has_metrics,
+            "message": expr.failure_reason or sim.error_message or "Normal diagnostic status."
+        }
+
+        return {
+            "simulation_id": sim.id,
+            "brain_simulation_id": sim.brain_simulation_id,
+            "brain_alpha_id": sim.brain_alpha_id,
+            "expression": expr.expression_text,
+            "simulation_status": sim.status,
+            "remote_status": sim.remote_status or ("COMPLETE" if sim.status in ("COMPLETE", "NO_VALID_METRICS") else sim.status),
+            "signal_type": expr.signal_type or "RAW_SIGNAL",
+            "diagnostic_category": expr.diagnostic_category or ("NO_VALID_METRICS" if sim.status == "NO_VALID_METRICS" else "NORMAL"),
+            "portfolio_status": expr.portfolio_status or ("PORTFOLIO_AVAILABLE" if has_metrics else "PORTFOLIO_EMPTY"),
+            "metrics_status": expr.metrics_status or ("METRICS_AVAILABLE" if has_metrics else "METRICS_MISSING"),
+            "evaluation_status": expr.evaluation_status or ("EVALUATED" if has_metrics else "TECHNICAL_FAILURE"),
+            "parser_status": expr.parser_status or ("VALID" if has_metrics else "NONE"),
+            "failure_reason": expr.failure_reason or sim.error_message,
+            "research_quality_score": expr.research_quality_score or 0.0,
+            "has_valid_metrics": has_metrics,
+            "raw_response_structure": sim.raw_response_structure or expr.raw_response_structure or {},
+            "metrics": {
+                "sharpe": metric.sharpe,
+                "fitness": metric.fitness,
+                "turnover": metric.turnover,
+                "margin": metric.margin
+            } if has_metrics else None,
+            "diagnostics": details
+        }
 
 @app.post("/api/passed/submit-registry")
 async def submit_passed_to_registry(request: Request, req: RegistrySubmitRequest):
@@ -1456,6 +1586,320 @@ async def debug_state():
     return {
         "active_sessions": sessions_info,
         "worker_clients": worker_clients
+    }
+
+# --- AI Integration Endpoints ---
+
+@app.get("/api/ai/status")
+async def get_ai_status():
+    """Returns safe AI provider status, connection state, and feature flags without credentials."""
+    return ai_manager.get_safe_status()
+
+@app.post("/api/ai/config")
+async def update_ai_config(req: AIConfigRequest):
+    """
+    Saves AI provider configuration, model, optional encrypted API key, and feature flags.
+    API key is never returned or exposed to frontend.
+    """
+    if req.api_key is not None:
+        ai_manager.set_credentials(req.provider, req.api_key, req.model)
+    else:
+        ai_manager.current_provider_name = req.provider.lower().strip()
+        if req.model:
+            ai_manager.current_model = req.model.strip()
+
+    if req.features:
+        ai_manager.features.update(req.features)
+    ai_manager.features["enabled"] = req.is_enabled
+    if req.max_daily_budget_calls:
+        ai_manager.max_daily_budget_calls = req.max_daily_budget_calls
+
+    # Persist to database asynchronously
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(AISetting).limit(1))
+            setting = result.scalar_one_or_none()
+            if not setting:
+                setting = AISetting(
+                    provider=ai_manager.current_provider_name,
+                    model=ai_manager.current_model,
+                    encrypted_api_key=ai_manager._encrypted_key,
+                    is_enabled=ai_manager.features["enabled"],
+                    features_json=ai_manager.features,
+                    validation_status=ai_manager.state.value
+                )
+                db.add(setting)
+            else:
+                setting.provider = ai_manager.current_provider_name
+                setting.model = ai_manager.current_model
+                if req.api_key is not None:
+                    setting.encrypted_api_key = ai_manager._encrypted_key
+                setting.is_enabled = ai_manager.features["enabled"]
+                setting.features_json = ai_manager.features
+                setting.validation_status = ai_manager.state.value
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Failed to persist AI settings to database: {e}")
+
+    return {
+        "success": True,
+        "message": "AI configuration updated successfully.",
+        "status": ai_manager.get_safe_status()
+    }
+
+@app.post("/api/ai/validate")
+async def validate_ai_credentials(req: Optional[AIValidateRequest] = None):
+    """
+    Validates current or supplied AI credentials via a minimal authenticated test request.
+    Never returns raw key or authorization headers.
+    """
+    if req:
+        if req.api_key is not None or req.provider is not None:
+            prov = req.provider or ai_manager.current_provider_name
+            raw_key = req.api_key if req.api_key is not None else (ai_manager.get_decrypted_key() or "")
+            ai_manager.set_credentials(prov, raw_key, req.model)
+
+    is_valid, msg = await ai_manager.validate_active_provider()
+    safe_status = ai_manager.get_safe_status()
+
+    # Update DB status
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(AISetting).limit(1))
+            setting = result.scalar_one_or_none()
+            if setting:
+                setting.validation_status = ai_manager.state.value
+                setting.last_validated = datetime.utcnow()
+                await db.commit()
+    except Exception:
+        pass
+
+    return {
+        "configured": safe_status["configured"],
+        "valid": is_valid,
+        "state": safe_status["state"],
+        "provider": safe_status["provider"],
+        "message": msg
+    }
+
+@app.get("/api/ai/usage")
+async def get_ai_usage():
+    """Returns safe AI usage metrics, call breakdown, and cost estimation."""
+    return {
+        "daily_calls": ai_manager.daily_calls,
+        "monthly_calls": ai_manager.monthly_calls,
+        "feature_calls": ai_manager.feature_calls,
+        "estimated_cost_usd": round(ai_manager.estimated_total_cost, 4),
+        "daily_budget_limit": ai_manager.max_daily_budget_calls,
+        "budget_remaining": max(0, ai_manager.max_daily_budget_calls - ai_manager.daily_calls)
+    }
+
+@app.post("/api/ai/chat")
+async def ai_chat_assistant(req: AIChatRequest):
+    """
+    Server-side AI quantitative assistant chat. Credentials remain completely on server.
+    """
+    if not ai_manager.is_available("summary"):
+        return {
+            "success": False,
+            "error": "AI Assistant is unavailable. Please configure and validate an AI API key in Settings.",
+            "reply": "AI is currently not configured or unavailable. You can continue using all Dumbo-Tron deterministic research features."
+        }
+
+    system_prompt = (
+        "You are an expert WorldQuant BRAIN Quantitative Alpha Research Assistant for Dumbo-Tron. "
+        "Help the user analyze expressions, understand statistical metrics (Sharpe, Fitness, Turnover, Stability), "
+        "and suggest sound mathematical formulations. Never output fake keys or credentials."
+    )
+    prompt = req.message
+    if req.context:
+        prompt = f"Context: {req.context}\n\nUser Question: {req.message}"
+
+    provider = ai_manager.get_provider()
+    key = ai_manager.get_decrypted_key()
+    if not provider or not key:
+        return {"success": False, "error": "AI provider unavailable", "reply": "AI provider is not configured."}
+
+    # Execute request
+    try:
+        data, err = await ai_manager.execute_structured_request(
+            feature_name="summary",
+            prompt=f"{prompt}\n\nPlease respond with a JSON object: {{\"reply\": \"...markdown response...\"}}",
+            system_prompt=system_prompt,
+            temperature=0.3
+        )
+        if err or not data or "reply" not in data:
+            # Safe text fallback
+            return {
+                "success": True,
+                "reply": data.get("reply", "Analysis complete.") if data else "I processed your request, but could not generate a detailed response."
+            }
+        return {"success": True, "reply": data["reply"]}
+    except Exception as e:
+        return {"success": False, "error": str(e), "reply": "An error occurred communicating with the AI service."}
+
+# --- AI Research Lab Endpoints ---
+
+class GenerateHypothesisRequest(BaseModel):
+    family: Optional[str] = None
+    market_regime: Optional[str] = None
+    context_notes: Optional[str] = None
+
+class QueueHypothesisRequest(BaseModel):
+    project_id: int
+    family: str
+    hypothesis_text: str
+    horizon: Optional[str] = "MEDIUM"
+    preferred_fields: Optional[List[str]] = None
+    suggested_transformations: Optional[List[str]] = None
+    count: int = 5
+
+class CriticReviewRequest(BaseModel):
+    expression: str
+    sharpe: float
+    fitness: float
+    turnover: float
+    stability_score: float = 0.85
+    robustness_score: float = 0.80
+
+@app.post("/api/ai/hypothesis/generate")
+async def generate_ai_hypothesis(req: GenerateHypothesisRequest):
+    """Generates a structured research hypothesis using AI or deterministic fallback."""
+    from brain_farm.app.ai.hypothesis_agent import HypothesisAgent
+    from brain_farm.app.services.field_manager import FieldManager
+    
+    async with AsyncSessionLocal() as db:
+        fields = await FieldManager.get_all_fields(db)
+        field_ids = [f.id for f in fields]
+        
+    agent = HypothesisAgent(field_ids)
+    hypothesis = await agent.generate_hypothesis(
+        target_family=req.family,
+        market_regime=req.market_regime,
+        context_notes=req.context_notes
+    )
+    return {
+        "success": True,
+        "hypothesis": hypothesis.model_dump(),
+        "ai_active": ai_manager.is_available("hypothesis")
+    }
+
+@app.post("/api/ai/hypothesis/synthesize-and-queue")
+async def synthesize_and_queue_hypothesis(req: QueueHypothesisRequest):
+    """Converts a structured hypothesis into validated expressions and enqueues them for simulation."""
+    from brain_farm.app.ai.hypothesis_agent import HypothesisAgent
+    from brain_farm.app.ai.schemas import ResearchHypothesis
+    from brain_farm.app.services.field_manager import FieldManager
+    from brain_farm.app.generators.expression_analyzer import analyze_expression
+
+    async with AsyncSessionLocal() as db:
+        # Check project exists
+        proj_res = await db.execute(select(Project).where(Project.id == req.project_id))
+        project = proj_res.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found.")
+
+        fields = await FieldManager.get_all_fields(db)
+        field_ids = [f.id for f in fields]
+
+        agent = HypothesisAgent(field_ids)
+        hypo = ResearchHypothesis(
+            family=req.family,
+            hypothesis=req.hypothesis_text,
+            horizon=req.horizon or "MEDIUM",
+            preferred_fields=req.preferred_fields or ["close", "volume"],
+            suggested_transformations=req.suggested_transformations or ["rank", "ts_decay_linear"]
+        )
+
+        formulas = agent.convert_hypothesis_to_expressions(hypo, count=req.count)
+        queued_count = 0
+
+        for f_text in formulas:
+            analysis = analyze_expression(f_text, field_ids)
+            expr = Expression(
+                project_id=project.id,
+                expression_text=f_text,
+                generator_type="AI_Hypothesis",
+                status="PENDING",
+                ai_generated=True,
+                ai_research_reason=req.hypothesis_text,
+                research_family=req.family,
+                hypothesis=req.hypothesis_text,
+                expected_horizon=req.horizon,
+                selected_fields=",".join(req.preferred_fields or []),
+                selected_operators=",".join(req.suggested_transformations or []),
+                operator_parameters=analysis["parameters"],
+                expected_turnover_category="HIGH_RETURN_LOW_TURNOVER",
+                expression_depth=analysis["expression_depth"],
+                operator_count=analysis["operator_count"],
+                field_count=analysis["field_count"],
+                complexity_score=analysis["complexity_score"],
+                generation_number=1
+            )
+            db.add(expr)
+            queued_count += 1
+
+        log = ProjectLog(
+            project_id=project.id,
+            level="INFO",
+            message=f"AI Hypothesis Engine queued {queued_count} candidates for family '{req.family}'. Hypothesis: {req.hypothesis_text[:80]}..."
+        )
+        db.add(log)
+        await db.commit()
+
+    return {
+        "success": True,
+        "queued_count": queued_count,
+        "formulas": formulas,
+        "message": f"Successfully queued {queued_count} hypothesis-driven alphas for project {project.name}."
+    }
+
+@app.get("/api/ai/director/plan")
+async def get_ai_director_plan(project_id: Optional[int] = Query(None)):
+    """Generates an AI Director research allocation plan based on historical memory."""
+    from brain_farm.app.ai.research_director import ResearchDirector
+    from brain_farm.app.ai.research_memory import ResearchMemoryManager
+    
+    async with AsyncSessionLocal() as db:
+        summary = await ResearchMemoryManager.get_memory_summary(db, project_id)
+        
+    director = ResearchDirector()
+    plan = await director.formulate_research_plan(summary, total_budget=100)
+    return {
+        "success": True,
+        "plan": plan.model_dump(),
+        "memory_summary": summary,
+        "ai_active": ai_manager.is_available("director")
+    }
+
+@app.get("/api/ai/memory")
+async def get_ai_research_memory(project_id: Optional[int] = Query(None)):
+    """Returns persistent empirical research memory summaries."""
+    from brain_farm.app.ai.research_memory import ResearchMemoryManager
+    async with AsyncSessionLocal() as db:
+        summary = await ResearchMemoryManager.get_memory_summary(db, project_id)
+    return {
+        "success": True,
+        "memory": summary
+    }
+
+@app.post("/api/ai/critic/review")
+async def review_alpha_with_critic(req: CriticReviewRequest):
+    """Runs adversarial AI critic assessment on an alpha candidate."""
+    from brain_farm.app.ai.critic_agent import CriticAgent
+    critic = CriticAgent()
+    review = await critic.review_candidate(
+        expression_text=req.expression,
+        sharpe=req.sharpe,
+        fitness=req.fitness,
+        turnover=req.turnover,
+        stability_score=req.stability_score,
+        robustness_score=req.robustness_score
+    )
+    return {
+        "success": True,
+        "review": review.model_dump(),
+        "ai_active": ai_manager.is_available("critic")
     }
 
 # Mount the static files directory

@@ -225,6 +225,14 @@ class SimulationWorker:
     async def process_queued_simulations(self):
         """Checks for QUEUED simulations and posts them to WorldQuant BRAIN."""
         async with AsyncSessionLocal() as db:
+            # First, recover any stale SUBMITTING simulations that might have hung
+            await db.execute(
+                update(Simulation)
+                .where(Simulation.status == "SUBMITTING")
+                .values(status="QUEUED")
+            )
+            await db.commit()
+
             result = await db.execute(
                 select(Simulation)
                 .join(Expression)
@@ -282,24 +290,14 @@ class SimulationWorker:
                 
                 if err:
                     if "RATE_LIMIT" in err:
-                        # Extract backoff timer in headers
                         backoff = int(err.split(":")[-1])
-                        logger.warning(f"Submission rate-limited. Backing off for {backoff} seconds.")
-                        await asyncio.sleep(backoff)
-                        
-                        # Re-open session to transition back to QUEUED
-                        async with AsyncSessionLocal() as db2:
-                            await db2.execute(
-                                update(Simulation)
-                                .where(Simulation.id == sim_id)
-                                .values(status="QUEUED")
-                            )
-                            await db2.commit()
+                        logger.warning(f"Submission rate-limited. Setting back to QUEUED (retry in {backoff}s).")
+                        sim.status = "QUEUED"
+                        await db.commit()
                     elif "re-authenticate" in err.lower() or "session expired" in err.lower():
-                        # Session died mid-flight — hold sim for retry, evict stale client
                         sim.status = "NEEDS_AUTH"
                         sim.error_message = err
-                        expr.status = "PENDING"  # Reset so it's re-queued after re-auth
+                        expr.status = "PENDING"
                         self._active_clients.pop(proj.user_id, None)
                         logger.warning(
                             f"Session expired for user_id={proj.user_id} during submission. "
@@ -321,6 +319,7 @@ class SimulationWorker:
                 else:
                     sim.brain_simulation_id = brain_sim_id
                     sim.status = "POLLING"
+                    sim.updated_at = datetime.utcnow()
                     await db.commit()
 
     async def poll_active_simulations(self):
@@ -334,7 +333,8 @@ class SimulationWorker:
                 .join(Project)
                 .options(selectinload(Simulation.expression).selectinload(Expression.project))
                 .where(Simulation.status.in_(["POLLING", "NEEDS_AUTH"]))
-                .limit(20)
+                .order_by(Simulation.updated_at.asc())
+                .limit(50)
             )
             sims = result.scalars().all()
 
@@ -371,6 +371,9 @@ class SimulationWorker:
             
             client = await self.get_client_for_user(proj.user_id)
             if not client:
+                sim.status = "NEEDS_AUTH"
+                sim.error_message = "Session expired. Please re-authenticate in the UI Auth panel."
+                await db.commit()
                 return
 
             # Check status on BRAIN API
@@ -378,299 +381,361 @@ class SimulationWorker:
             
             if err:
                 sim.retry_count += 1
-                if sim.retry_count > 5:
+                if sim.retry_count > 10:
                     sim.status = "ERROR"
                     sim.error_message = f"Max polling failures reached: {err}"
                     expr.status = "ERROR"
                 await db.commit()
                 return
 
-            status = data.get("status")
-            TERMINAL_SUCCESS = {"COMPLETE", "OK", "DONE", "WARNING"}
-            TERMINAL_FAILURE = {"ERROR", "FAILED", "CANCELLED"}
+            from brain_farm.app.services.response_auditor import ResponseStructureAuditor
+            audit = ResponseStructureAuditor.audit(data, http_status=200, expression_text=expr.expression_text)
+            
+            # Save raw structure and remote status
+            sim.remote_status = audit["remote_status"]
+            sim.raw_response_structure = audit["sanitized_response"]
+            expr.raw_response_structure = audit["sanitized_response"]
 
-            if status in TERMINAL_SUCCESS:
-                # Simulation finished! Parse metrics
-                sim.status = "COMPLETE"
-                sim.brain_alpha_id = data.get("alpha")
-                
-                # Fetch IS metrics details
-                is_data = data.get("is", {})
-                sharpe = float(is_data.get("sharpe", 0.0))
-                fitness = float(is_data.get("fitness", 0.0))
-                turnover = float(is_data.get("turnover", 0.0))
-                returns = float(is_data.get("returns", 0.0))
-                margin = float(is_data.get("margin", 0.0))
-                drawdown = float(is_data.get("drawdown", 0.0)) if is_data.get("drawdown") else 0.0
-                
-                # Compute advanced Phase 3 metrics
-                from brain_farm.app.services.ic_calculator import ICCalculator
-                from brain_farm.app.services.walk_forward import WalkForwardTester
-                from brain_farm.app.services.regime_analyzer import RegimeAnalyzer
-                from brain_farm.app.services.composite_scorer import WeightedCompositeScorer
-                
-                ic_m = ICCalculator.calculate_ic_metrics(expr.expression_text, sharpe)
-                wf_m = WalkForwardTester.evaluate_walk_forward(expr.expression_text, sharpe)
-                reg_m = RegimeAnalyzer.evaluate_regimes(expr.expression_text, sharpe)
-                
-                comp_res = await WeightedCompositeScorer.compute_composite_score(
-                    expr_text=expr.expression_text,
+            if audit["evaluation_status"] == "PENDING":
+                # Still running on remote server — update timestamp
+                sim.updated_at = datetime.utcnow()
+                await db.commit()
+                return
+
+            if audit["evaluation_status"] == "TECHNICAL_FAILURE" or audit["metrics_status"] != "METRICS_AVAILABLE":
+                # Isolate technical / parsing / empty portfolio failures from alpha performance evaluation
+                sim.status = "NO_VALID_METRICS" if audit["remote_status"] == "COMPLETE" else "ERROR"
+                sim.error_message = audit["failure_reason"]
+                sim.diagnostic_details = {
+                    "simulation_status": audit["remote_status"],
+                    "brain_response_status": audit["remote_status"],
+                    "parser_status": audit["parser_path_used"],
+                    "portfolio_status": audit["portfolio_status"],
+                    "metrics_status": audit["metrics_status"],
+                    "evaluation_status": "TECHNICAL_FAILURE",
+                    "result_availability": True,
+                    "portfolio_availability": audit["portfolio_status"] == "PORTFOLIO_AVAILABLE",
+                    "metric_availability": False,
+                    "trade_availability": audit["has_trades"],
+                    "top_level_keys": audit["top_level_keys"],
+                    "relevant_nested_keys": audit["relevant_nested_keys"],
+                    "message": audit["failure_reason"]
+                }
+
+                expr.status = "NO_VALID_METRICS" if audit["remote_status"] == "COMPLETE" else "ERROR"
+                expr.diagnostic_category = "NO_VALID_METRICS"
+                expr.evaluation_status = "TECHNICAL_FAILURE"
+                expr.portfolio_status = audit["portfolio_status"]
+                expr.metrics_status = audit["metrics_status"]
+                expr.parser_status = audit["parser_path_used"]
+                expr.failure_reason = audit["failure_reason"]
+
+                log = ProjectLog(
                     project_id=proj.id,
-                    sharpe=sharpe,
-                    fitness=fitness,
-                    walk_forward_score=wf_m["walk_forward_score"],
-                    regime_score=reg_m["regime_score"],
-                    complexity_score=expr.complexity_score,
-                    db=db
+                    level="WARNING",
+                    message=(
+                        f"Post-Simulation Technical Failure for '{expr.expression_text}'\n"
+                        f"Remote Status: {audit['remote_status']} | Alpha ID: {data.get('alpha', 'N/A')}\n"
+                        f"Portfolio Status: {audit['portfolio_status']} | Metrics Status: {audit['metrics_status']}\n"
+                        f"Parser Path: {audit['parser_path_used']}\n"
+                        f"Diagnostic: {audit['failure_reason']}"
+                    )
                 )
+                db.add(log)
+                await db.commit()
+                return
 
-                # Compute and populate parameter sensitivity and regime Performance JSON values
-                from brain_farm.app.services.sensitivity import ParameterSensitivityTester
-                from brain_farm.app.services.correlation_filter import CorrelationFilter
-                import numpy as np
-                perturbed = ParameterSensitivityTester.generate_perturbed_expressions(expr.expression_text)
-                p_corrs = []
-                for p_expr in perturbed:
-                    p_corr = CorrelationFilter.calculate_correlation(expr.expression_text, p_expr)
-                    p_corrs.append({"expression": p_expr, "correlation": float(p_corr)})
+            # Valid metrics present -> Set evaluation states
+            extracted = audit["extracted_metrics"]
+            sim.status = "COMPLETE"
+            sim.brain_alpha_id = data.get("alpha")
+            sim.diagnostic_details = {
+                "simulation_status": "COMPLETED",
+                "brain_response_status": audit["remote_status"],
+                "parser_status": audit["parser_path_used"],
+                "portfolio_status": "PORTFOLIO_AVAILABLE",
+                "metrics_status": "METRICS_AVAILABLE",
+                "evaluation_status": "EVALUATED",
+                "result_availability": True,
+                "portfolio_availability": True,
+                "metric_availability": True,
+                "trade_availability": audit["has_trades"],
+                "top_level_keys": audit["top_level_keys"],
+                "relevant_nested_keys": audit["relevant_nested_keys"]
+            }
+
+            expr.evaluation_status = "EVALUATED"
+            expr.portfolio_status = "PORTFOLIO_AVAILABLE"
+            expr.metrics_status = "METRICS_AVAILABLE"
+            expr.parser_status = audit["parser_path_used"]
+            expr.failure_reason = None
+            
+            # Fetch IS metrics details from auditor
+            sharpe = extracted["sharpe"]
+            fitness = extracted["fitness"]
+            turnover = extracted["turnover"]
+            returns = extracted["returns"]
+            margin = extracted["margin"]
+            drawdown = extracted["drawdown"]
                 
-                stability_score = float(np.mean([abs(c["correlation"]) for c in p_corrs])) if p_corrs else 1.0
+            # Compute advanced Phase 3 metrics
+            from brain_farm.app.services.ic_calculator import ICCalculator
+            from brain_farm.app.services.walk_forward import WalkForwardTester
+            from brain_farm.app.services.regime_analyzer import RegimeAnalyzer
+            from brain_farm.app.services.composite_scorer import WeightedCompositeScorer
+            
+            ic_m = ICCalculator.calculate_ic_metrics(expr.expression_text, sharpe)
+            wf_m = WalkForwardTester.evaluate_walk_forward(expr.expression_text, sharpe)
+            reg_m = RegimeAnalyzer.evaluate_regimes(expr.expression_text, sharpe)
+            
+            comp_res = await WeightedCompositeScorer.compute_composite_score(
+                expr_text=expr.expression_text,
+                project_id=proj.id,
+                sharpe=sharpe,
+                fitness=fitness,
+                walk_forward_score=wf_m["walk_forward_score"],
+                regime_score=reg_m["regime_score"],
+                complexity_score=expr.complexity_score,
+                db=db
+            )
+
+            # Compute and populate parameter sensitivity and regime Performance JSON values
+            from brain_farm.app.services.sensitivity import ParameterSensitivityTester
+            from brain_farm.app.services.correlation_filter import CorrelationFilter
+            import numpy as np
+            perturbed = ParameterSensitivityTester.generate_perturbed_expressions(expr.expression_text)
+            p_corrs = []
+            for p_expr in perturbed:
+                p_corr = CorrelationFilter.calculate_correlation(expr.expression_text, p_expr)
+                p_corrs.append({"expression": p_expr, "correlation": float(p_corr)})
+            
+            stability_score = float(np.mean([abs(c["correlation"]) for c in p_corrs])) if p_corrs else 1.0
+            
+            expr.parameter_sensitivity = {
+                "penalty": float(ParameterSensitivityTester.evaluate_sensitivity_penalty(expr.expression_text, sharpe)),
+                "correlations": p_corrs
+            }
+            
+            expr.regime_performance = {
+                "sharpe_run_low": float(reg_m["sharpe_run_low"]),
+                "sharpe_run_high": float(reg_m["sharpe_run_high"])
+            }
+            
+            # Robustness score combines walk forward, stability, and regime scores
+            robustness_score = float(0.40 * wf_m["walk_forward_score"] + 0.30 * stability_score + 0.30 * reg_m["regime_score"])
+            
+            diversity_score = float(comp_res["diversity_score"])
+            simplicity_score = float(comp_res["simplicity_score"])
+            
+            # Upgraded multi-factor research score
+            alpha_res = await WeightedCompositeScorer.compute_alpha_research_score(
+                expr_text=expr.expression_text,
+                project_id=proj.id,
+                sharpe=sharpe,
+                fitness=fitness,
+                turnover=turnover,
+                stability=stability_score,
+                robustness=robustness_score,
+                complexity_score=expr.complexity_score,
+                db=db
+            )
+            alpha_research_reward = alpha_res["alpha_research_score"]
+            
+            # Evaluate against thresholds
+            sub_universe_data = data.get("subUniverseSharpe", {})
+            passed_sub_sharpe = True
+            failing_sub_universes = []
+            for sub_universe, sub_sharpe in sub_universe_data.items():
+                sub_sharpe_val = float(sub_sharpe)
+                if sub_sharpe_val < proj.min_sub_universe_sharpe:
+                    passed_sub_sharpe = False
+                    failing_sub_universes.append(f"{sub_universe}: {sub_sharpe_val:.2f}")
+
+            passed = (
+                sharpe >= proj.min_sharpe and 
+                fitness >= proj.min_fitness and 
+                turnover <= proj.max_turnover and 
+                margin >= proj.min_margin and
+                passed_sub_sharpe
+            )
+            
+            # Determine Candidate Tier (0 to 6) and Diagnostic Category
+            tier = 6
+            if passed:
+                tier = 0
+                expr.diagnostic_category = "ROBUST_CANDIDATE" if robustness_score >= 0.80 else "HIGH_QUALITY"
+            else:
+                if (fitness >= proj.min_fitness and turnover <= proj.max_turnover and 
+                    margin >= proj.min_margin and passed_sub_sharpe and 
+                    1.10 <= sharpe < proj.min_sharpe):
+                    tier = 1
+                    expr.diagnostic_category = "NEAR_MISS"
+                elif (sharpe >= proj.min_sharpe and turnover <= proj.max_turnover and 
+                      margin >= proj.min_margin and passed_sub_sharpe and 
+                      0.85 <= fitness < proj.min_fitness):
+                    tier = 2
+                    expr.diagnostic_category = "NEAR_MISS"
+                elif (sharpe >= proj.min_sharpe and fitness >= proj.min_fitness and 
+                      turnover > proj.max_turnover):
+                    tier = 3
+                    expr.diagnostic_category = "HIGH_SHARPE_HIGH_TURNOVER"
+                elif (sharpe >= proj.min_sharpe and fitness >= proj.min_fitness and 
+                      turnover <= proj.max_turnover and margin >= proj.min_margin and 
+                      passed_sub_sharpe and stability_score < 0.85):
+                    tier = 4
+                    expr.diagnostic_category = "NEAR_MISS"
+                elif sharpe >= 0.80:
+                    tier = 5
+                    expr.diagnostic_category = "WEAK_ALPHA"
+                else:
+                    expr.diagnostic_category = "WEAK_ALPHA"
+
+            # Save metrics to DB
+            metric = Metric(
+                simulation_id=sim.id,
+                has_valid_metrics=True,
+                sharpe=sharpe,
+                fitness=fitness,
+                turnover=turnover,
+                returns=returns,
+                margin=margin,
+                drawdown=drawdown,
+                long_count=int(data.get("longCount", 0)) if data.get("longCount") else None,
+                short_count=int(data.get("shortCount", 0)) if data.get("shortCount") else None,
                 
-                expr.parameter_sensitivity = {
-                    "penalty": float(ParameterSensitivityTester.evaluate_sensitivity_penalty(expr.expression_text, sharpe)),
-                    "correlations": p_corrs
-                }
+                # Advanced metrics columns
+                rank_ic=ic_m["rank_ic"],
+                mean_ic=ic_m["mean_ic"],
+                median_ic=ic_m["median_ic"],
+                ic_std_dev=ic_m["ic_std_dev"],
+                ic_ir=ic_m["ic_ir"],
+                positive_ic_ratio=ic_m["positive_ic_ratio"],
+                walk_forward_score=wf_m["walk_forward_score"],
+                regime_score=reg_m["regime_score"],
+                correlation_score=diversity_score,
+                composite_research_score=comp_res["composite_score"],
                 
-                expr.regime_performance = {
-                    "sharpe_run_low": float(reg_m["sharpe_run_low"]),
-                    "sharpe_run_high": float(reg_m["sharpe_run_high"])
-                }
+                # Upgraded fields
+                stability_score=stability_score,
+                robustness_score=robustness_score,
+                diversity_score=diversity_score,
+                simplicity_score=simplicity_score,
+                alpha_research_score=alpha_research_reward,
                 
-                # Robustness score combines walk forward, stability, and regime scores
-                robustness_score = float(0.40 * wf_m["walk_forward_score"] + 0.30 * stability_score + 0.30 * reg_m["regime_score"])
+                walk_forward_mean_sharpe=wf_m.get("mean_sharpe"),
+                walk_forward_median_sharpe=wf_m.get("median_sharpe"),
+                walk_forward_min_sharpe=wf_m.get("min_sharpe"),
+                walk_forward_variance=wf_m.get("variance"),
+                parameter_stability_score=stability_score,
                 
-                diversity_score = float(comp_res["diversity_score"])
-                simplicity_score = float(comp_res["simplicity_score"])
-                
-                # Upgraded multi-factor research score
-                alpha_res = await WeightedCompositeScorer.compute_alpha_research_score(
-                    expr_text=expr.expression_text,
-                    project_id=proj.id,
+                candidate_tier=tier
+            )
+
+            # AI Critic adversarial review for passed candidates (optional & advisory)
+            if passed:
+                try:
+                    from brain_farm.app.ai.critic_agent import CriticAgent
+                    critic = CriticAgent()
+                    review = await critic.review_candidate(
+                        expression_text=expr.expression_text,
+                        sharpe=sharpe,
+                        fitness=fitness,
+                        turnover=turnover,
+                        stability_score=stability_score,
+                        robustness_score=robustness_score,
+                        parameter_sensitivity=expr.parameter_sensitivity,
+                        walk_forward_score=wf_m["walk_forward_score"]
+                    )
+                    metric.ai_critic_risk_level = review.risk_level
+                    metric.ai_critic_review = review.model_dump()
+                except Exception as e:
+                    logger.warning(f"AI Critic evaluation skipped: {e}")
+
+            db.add(metric)
+            
+            # Empirical Research Memory Recording
+            try:
+                from brain_farm.app.ai.research_memory import ResearchMemoryManager
+                await ResearchMemoryManager.record_simulation_outcome(
+                    db=db,
+                    family=expr.research_family,
+                    transformation=expr.transformation_type,
                     sharpe=sharpe,
                     fitness=fitness,
                     turnover=turnover,
                     stability=stability_score,
-                    robustness=robustness_score,
-                    complexity_score=expr.complexity_score,
-                    db=db
+                    passed=passed,
+                    project_id=proj.id
                 )
-                alpha_research_reward = alpha_res["alpha_research_score"]
-                
-                # Evaluate against thresholds
-                sub_universe_data = data.get("subUniverseSharpe", {})
-                passed_sub_sharpe = True
-                failing_sub_universes = []
-                for sub_universe, sub_sharpe in sub_universe_data.items():
-                    sub_sharpe_val = float(sub_sharpe)
-                    if sub_sharpe_val < proj.min_sub_universe_sharpe:
-                        passed_sub_sharpe = False
-                        failing_sub_universes.append(f"{sub_universe}: {sub_sharpe_val:.2f}")
-
-                passed = (
-                    sharpe >= proj.min_sharpe and 
-                    fitness >= proj.min_fitness and 
-                    turnover <= proj.max_turnover and 
-                    margin >= proj.min_margin and
-                    passed_sub_sharpe
+            except Exception as e:
+                logger.warning(f"Research memory recording skipped: {e}")
+            
+            if passed:
+                expr.status = "PASSED"
+                level = "SUCCESS"
+                msg = (
+                    f"Alpha Mined Passed (Tier {tier})!\n"
+                    f"Formula: '{expr.expression_text}'\n"
+                    f"Metrics:\n"
+                    f"  - Sharpe: {sharpe:.4f} (Expected >= {proj.min_sharpe:.2f})\n"
+                    f"  - Fitness: {fitness:.4f} (Expected >= {proj.min_fitness:.2f})\n"
+                    f"  - Turnover: {turnover:.2%} (Expected <= {proj.max_turnover:.2%})\n"
+                    f"  - Margin: {margin:.2f} bps (Expected >= {proj.min_margin:.2f} bps)\n"
+                    f"  - Sub-Universe Sharpe: {'Passed' if passed_sub_sharpe else 'Failed'} (Expected >= {proj.min_sub_universe_sharpe:.2f})\n"
+                    f"Advice: Alpha meets all target thresholds. Ready for registry staging."
                 )
-                
-                # Determine Candidate Tier (0 to 6)
-                tier = 6
-                if passed:
-                    tier = 0
-                else:
-                    if (fitness >= proj.min_fitness and turnover <= proj.max_turnover and 
-                        margin >= proj.min_margin and passed_sub_sharpe and 
-                        1.10 <= sharpe < proj.min_sharpe):
-                        tier = 1
-                    elif (sharpe >= proj.min_sharpe and turnover <= proj.max_turnover and 
-                          margin >= proj.min_margin and passed_sub_sharpe and 
-                          0.85 <= fitness < proj.min_fitness):
-                        tier = 2
-                    elif (sharpe >= proj.min_sharpe and fitness >= proj.min_fitness and 
-                          turnover > proj.max_turnover):
-                        tier = 3
-                    elif (sharpe >= proj.min_sharpe and fitness >= proj.min_fitness and 
-                          turnover <= proj.max_turnover and margin >= proj.min_margin and 
-                          passed_sub_sharpe and stability_score < 0.85):
-                        tier = 4
-                    elif sharpe >= 0.80:
-                        tier = 5
-
-                # Save metrics to DB
-                metric = Metric(
-                    simulation_id=sim.id,
-                    sharpe=sharpe,
-                    fitness=fitness,
-                    turnover=turnover,
-                    returns=returns,
-                    margin=margin,
-                    drawdown=drawdown,
-                    long_count=int(data.get("longCount", 0)) if data.get("longCount") else None,
-                    short_count=int(data.get("shortCount", 0)) if data.get("shortCount") else None,
-                    
-                    # Advanced metrics columns
-                    rank_ic=ic_m["rank_ic"],
-                    mean_ic=ic_m["mean_ic"],
-                    median_ic=ic_m["median_ic"],
-                    ic_std_dev=ic_m["ic_std_dev"],
-                    ic_ir=ic_m["ic_ir"],
-                    positive_ic_ratio=ic_m["positive_ic_ratio"],
-                    walk_forward_score=wf_m["walk_forward_score"],
-                    regime_score=reg_m["regime_score"],
-                    correlation_score=diversity_score,
-                    composite_research_score=comp_res["composite_score"],
-                    
-                    # Upgraded fields
-                    stability_score=stability_score,
-                    robustness_score=robustness_score,
-                    diversity_score=diversity_score,
-                    simplicity_score=simplicity_score,
-                    alpha_research_score=alpha_research_reward,
-                    
-                    walk_forward_mean_sharpe=wf_m.get("mean_sharpe"),
-                    walk_forward_median_sharpe=wf_m.get("median_sharpe"),
-                    walk_forward_min_sharpe=wf_m.get("min_sharpe"),
-                    walk_forward_variance=wf_m.get("variance"),
-                    parameter_stability_score=stability_score,
-                    
-                    candidate_tier=tier
-                )
-                db.add(metric)
-                
-                if passed:
-                    expr.status = "PASSED"
-                    level = "SUCCESS"
-                    msg = (
-                        f"Alpha Mined Passed (Tier {tier})!\n"
-                        f"Formula: '{expr.expression_text}'\n"
-                        f"Metrics:\n"
-                        f"  - Sharpe: {sharpe:.4f} (Expected >= {proj.min_sharpe:.2f})\n"
-                        f"  - Fitness: {fitness:.4f} (Expected >= {proj.min_fitness:.2f})\n"
-                        f"  - Turnover: {turnover:.2%} (Expected <= {proj.max_turnover:.2%})\n"
-                        f"  - Margin: {margin:.2f} bps (Expected >= {proj.min_margin:.2f} bps)\n"
-                        f"  - Sub-Universe Sharpe: {'Passed' if passed_sub_sharpe else 'Failed'} (Expected >= {proj.min_sub_universe_sharpe:.2f})\n"
-                        f"Advice: Alpha meets all target thresholds. Ready for registry staging."
-                    )
-                else:
-                    expr.status = "REJECTED"
-                    level = "WARNING"
-                    
-                    advisor_tips = []
-                    if sharpe < proj.min_sharpe:
-                        advisor_tips.append("Low Sharpe: Try adding a lookback window (e.g. ts_delay) or applying cross-sectional ranking to neutralize market beta, or try a different research family style.")
-                    if fitness < proj.min_fitness:
-                        advisor_tips.append("Low Fitness: Improve return-to-turnover ratio by applying decay/smoothing (e.g. ts_decay_linear) to reduce excessive trades, or try combining it with a volume/liquidity filter.")
-                    if turnover > proj.max_turnover:
-                        advisor_tips.append("High Turnover: Apply linear decay (ts_decay_linear) or increase the lookback window of your signals to slow down transition rates.")
-                    if margin < proj.min_margin:
-                        advisor_tips.append("Low Margin: Focus on less liquid or high-spread industry groups, or combine with a price scaling factor, or apply subindustry neutralization.")
-                    if not passed_sub_sharpe:
-                        sub_details = ", ".join(failing_sub_universes)
-                        advisor_tips.append(f"Sub-Universe Sharpe Failure ({sub_details}): The alpha lacks robustness across segments. Consider subindustry neutralization or applying a global cross-sectional rank (e.g., rank(expr)) to stabilize sub-portfolio dynamics.")
-                    
-                    advice_str = " | ".join(advisor_tips) if advisor_tips else "Examine custom formula constraints."
-                    
-                    msg = (
-                        f"Alpha Rejected (Tier {tier})!\n"
-                        f"Formula: '{expr.expression_text}'\n"
-                        f"Metrics Comparison:\n"
-                        f"  - Sharpe: {sharpe:.4f} (Expected >= {proj.min_sharpe:.2f}) -> {'PASS' if sharpe >= proj.min_sharpe else 'FAIL'}\n"
-                        f"  - Fitness: {fitness:.4f} (Expected >= {proj.min_fitness:.2f}) -> {'PASS' if fitness >= proj.min_fitness else 'FAIL'}\n"
-                        f"  - Turnover: {turnover:.2%} (Expected <= {proj.max_turnover:.2%}) -> {'PASS' if turnover <= proj.max_turnover else 'FAIL'}\n"
-                        f"  - Margin: {margin:.2f} bps (Expected >= {proj.min_margin:.2f} bps) -> {'PASS' if margin >= proj.min_margin else 'FAIL'}\n"
-                        f"  - Sub-Universe Sharpe: {'PASS' if passed_sub_sharpe else 'FAIL'} (Expected >= {proj.min_sub_universe_sharpe:.2f})\n"
-                        f"Advice: {advice_str}"
-                    )
-                
-                log = ProjectLog(
-                    project_id=proj.id,
-                    level=level,
-                    message=msg
-                )
-                db.add(log)
-                await db.commit()
-                
-                # Recalculate Pareto Optimization Frontier and commit
-                await self._recalculate_pareto_frontier(proj.id, db)
-                await db.commit()
-                
-                # Close the loop optimizer + queue routing based on Tier
-                if tier in (1, 2):
-                    # Spawn near-miss optimization task in the background
-                    asyncio.create_task(self._optimize_rejected_alpha(proj.id, expr.id, msg))
-                elif tier == 3:
-                    # High Turnover post-process smoothing
-                    asyncio.create_task(self._smooth_high_turnover_alpha(proj.id, expr.id))
-                elif tier == 6:
-                    logger.info(f"Toxic space research rejection (Tier 6) for expression ID={expr.id}")
-                    
-            elif status in TERMINAL_FAILURE:
-                sim.status = "ERROR"
-                sim.error_message = data.get("message", f"Simulation ended with status: {status}")
-                expr.status = "ERROR"
-                
-                err_msg = sim.error_message
-                advice = "Verify syntax, check for balanced brackets, and ensure all variables are correct."
-                if "unknown variable" in err_msg.lower() or "variable" in err_msg.lower():
-                    advice = "Ensure all database codes (e.g., closing price, specific data field) exist in the data catalog, are spelt correctly, and use the correct capitalization."
-                elif "parse" in err_msg.lower() or "syntax" in err_msg.lower():
-                    advice = "Check formula syntax and match parentheses/brackets, ensuring correct function formatting (e.g., ts_sum(x, 10))."
-                elif "zero division" in err_msg.lower() or "divide by zero" in err_msg.lower():
-                    advice = "Prevent zero division issues by adding a small constant or using safe operators."
-                
-                log = ProjectLog(
-                    project_id=proj.id,
-                    level="ERROR",
-                    message=(
-                        f"Simulation ERROR for '{expr.expression_text}'\n"
-                        f"Error: {err_msg}\n"
-                        f"Advice: {advice}"
-                    )
-                )
-                db.add(log)
-                await db.commit()
-                
             else:
-                # Still RUNNING or QUEUED on the remote server — update timestamp
-                sim.updated_at = datetime.utcnow()
-
-                # Safety timeout: if a simulation has been polling for too long, abort it.
-                MAX_POLL_MINUTES = 60
-                poll_start = sim.started_at if hasattr(sim, "started_at") and sim.started_at else sim.updated_at
-                if poll_start:
-                    age_minutes = (datetime.utcnow() - poll_start).total_seconds() / 60
-                    if age_minutes > MAX_POLL_MINUTES:
-                        sim.status = "ERROR"
-                        sim.error_message = (
-                            f"Timed out after {int(age_minutes)}m with remote status: {status!r}"
-                        )
-                        expr.status = "ERROR"
-                        log = ProjectLog(
-                            project_id=proj.id,
-                            level="ERROR",
-                            message=(
-                                f"Simulation timed out ({int(age_minutes)}m) for "
-                                f"'{expr.expression_text[:30]}...' — last status: {status!r}"
-                            )
-                        )
-                        db.add(log)
-                        logger.warning(
-                            f"Sim {sim.id} timed out after {int(age_minutes)}m "
-                            f"(brain_id={sim.brain_simulation_id}, last status={status!r})"
-                        )
-
-                await db.commit()
+                expr.status = "REJECTED"
+                level = "WARNING"
+                
+                advisor_tips = []
+                if sharpe < proj.min_sharpe:
+                    advisor_tips.append("Low Sharpe: Try adding a lookback window (e.g. ts_delay) or applying cross-sectional ranking to neutralize market beta, or try a different research family style.")
+                if fitness < proj.min_fitness:
+                    advisor_tips.append("Low Fitness: Improve return-to-turnover ratio by applying decay/smoothing (e.g. ts_decay_linear) to reduce excessive trades, or try combining it with a volume/liquidity filter.")
+                if turnover > proj.max_turnover:
+                    advisor_tips.append("High Turnover: Apply linear decay (ts_decay_linear) or increase the lookback window of your signals to slow down transition rates.")
+                if margin < proj.min_margin:
+                    advisor_tips.append("Low Margin: Focus on less liquid or high-spread industry groups, or combine with a price scaling factor, or apply subindustry neutralization.")
+                if not passed_sub_sharpe:
+                    sub_details = ", ".join(failing_sub_universes)
+                    advisor_tips.append(f"Sub-Universe Sharpe Failure ({sub_details}): The alpha lacks robustness across segments. Consider subindustry neutralization or applying a global cross-sectional rank (e.g., rank(expr)) to stabilize sub-portfolio dynamics.")
+                
+                advice_str = " | ".join(advisor_tips) if advisor_tips else "Examine custom formula constraints."
+                
+                msg = (
+                    f"Alpha Rejected (Tier {tier})!\n"
+                    f"Formula: '{expr.expression_text}'\n"
+                    f"Metrics Comparison:\n"
+                    f"  - Sharpe: {sharpe:.4f} (Expected >= {proj.min_sharpe:.2f}) -> {'PASS' if sharpe >= proj.min_sharpe else 'FAIL'}\n"
+                    f"  - Fitness: {fitness:.4f} (Expected >= {proj.min_fitness:.2f}) -> {'PASS' if fitness >= proj.min_fitness else 'FAIL'}\n"
+                    f"  - Turnover: {turnover:.2%} (Expected <= {proj.max_turnover:.2%}) -> {'PASS' if turnover <= proj.max_turnover else 'FAIL'}\n"
+                    f"  - Margin: {margin:.2f} bps (Expected >= {proj.min_margin:.2f} bps) -> {'PASS' if margin >= proj.min_margin else 'FAIL'}\n"
+                    f"  - Sub-Universe Sharpe: {'PASS' if passed_sub_sharpe else 'FAIL'} (Expected >= {proj.min_sub_universe_sharpe:.2f})\n"
+                    f"Advice: {advice_str}"
+                )
+            
+            log = ProjectLog(
+                project_id=proj.id,
+                level=level,
+                message=msg
+            )
+            db.add(log)
+            await db.commit()
+            
+            # Recalculate Pareto Optimization Frontier and commit
+            await self._recalculate_pareto_frontier(proj.id, db)
+            await db.commit()
+            
+            # Close the loop optimizer + queue routing based on Tier
+            if tier in (1, 2):
+                # Spawn near-miss optimization task in the background
+                asyncio.create_task(self._optimize_rejected_alpha(proj.id, expr.id, msg))
+            elif tier == 3:
+                # High Turnover post-process smoothing
+                asyncio.create_task(self._smooth_high_turnover_alpha(proj.id, expr.id))
+            elif tier == 6:
+                logger.info(f"Toxic space research rejection (Tier 6) for expression ID={expr.id}")
 
     async def _optimize_rejected_alpha(self, project_id: int, expr_id: int, fail_reason: str):
         """Optimizes a failed expression and re-submits it into the queue."""
@@ -806,51 +871,72 @@ class SimulationWorker:
             from brain_farm.app.generators.transformations import apply_linear_decay
             from brain_farm.app.evaluators.validator import FormulaValidator
             from brain_farm.app.services.field_manager import FieldManager
-
-            smoothed_expr = apply_linear_decay(expr.expression_text, 5)
+            from brain_farm.app.ai.turnover_agent import TurnoverAgent
 
             fields = await FieldManager.get_all_fields(db)
             field_ids = [f.id for f in fields]
 
-            ok, _ = FormulaValidator.validate(smoothed_expr, field_ids)
-            if ok:
-                # Check duplication
-                dup_check = await db.execute(
-                    select(Expression)
-                    .where(Expression.project_id == project_id)
-                    .where(Expression.expression_text == smoothed_expr)
-                )
-                if not dup_check.scalar_one_or_none():
-                    from brain_farm.app.generators.expression_analyzer import analyze_expression
-                    analysis = analyze_expression(smoothed_expr, field_ids)
+            agent = TurnoverAgent(field_ids)
+            # Use candidate metrics if available
+            sharpe_val = 1.30
+            fitness_val = 1.05
+            turnover_val = 0.85
+            if hasattr(expr, "simulations") and expr.simulations:
+                sim = expr.simulations[-1]
+                if sim.metrics:
+                    sharpe_val = sim.metrics.sharpe
+                    fitness_val = sim.metrics.fitness
+                    turnover_val = sim.metrics.turnover
 
-                    new_expr = Expression(
-                        project_id=project_id,
-                        expression_text=smoothed_expr,
-                        generator_type="DecayOpt",
-                        status="PENDING",
-                        parent_id=expr.id,
-                        transformation_parent=expr.id,
-                        transformation_type="DECAY_SMOOTHING",
-                        research_family=expr.research_family,
-                        hypothesis=expr.hypothesis,
-                        expected_horizon="SHORT",
-                        selected_fields=expr.selected_fields,
-                        selected_operators=expr.selected_operators,
-                        operator_parameters=analysis["parameters"],
-                        expected_turnover_category="HIGH_RETURN_LOW_TURNOVER",
-                        expression_depth=analysis["expression_depth"],
-                        operator_count=analysis["operator_count"],
-                        field_count=analysis["field_count"],
-                        complexity_score=analysis["complexity_score"],
-                        generation_number=expr.generation_number + 1
+            proposal = await agent.propose_turnover_reduction(
+                expression_text=expr.expression_text,
+                sharpe=sharpe_val,
+                fitness=fitness_val,
+                turnover=turnover_val
+            )
+            candidate_list = agent.generate_smoothed_candidates(expr.expression_text, proposal)
+
+            for smoothed_expr in candidate_list[:2]:
+                ok, _ = FormulaValidator.validate(smoothed_expr, field_ids)
+                if ok and smoothed_expr != expr.expression_text:
+                    dup_check = await db.execute(
+                        select(Expression)
+                        .where(Expression.project_id == project_id)
+                        .where(Expression.expression_text == smoothed_expr)
                     )
-                    db.add(new_expr)
-                    
-                    log = ProjectLog(
-                        project_id=project_id,
-                        level="INFO",
-                        message=f"Smoothing optimization: queued '{smoothed_expr[:30]}...' from parent '{expr.expression_text[:30]}...'"
-                    )
-                    db.add(log)
-                    await db.commit()
+                    if not dup_check.scalar_one_or_none():
+                        from brain_farm.app.generators.expression_analyzer import analyze_expression
+                        analysis = analyze_expression(smoothed_expr, field_ids)
+
+                        new_expr = Expression(
+                            project_id=project_id,
+                            expression_text=smoothed_expr,
+                            generator_type="TurnoverOpt",
+                            status="PENDING",
+                            parent_id=expr.id,
+                            transformation_parent=expr.id,
+                            transformation_type="AI_TURNOVER_SMOOTHING",
+                            ai_generated=True,
+                            ai_research_reason=proposal.explanation,
+                            research_family=expr.research_family,
+                            hypothesis=expr.hypothesis,
+                            expected_horizon="MEDIUM",
+                            selected_fields=expr.selected_fields,
+                            selected_operators=expr.selected_operators,
+                            operator_parameters=analysis["parameters"],
+                            expected_turnover_category="HIGH_RETURN_LOW_TURNOVER",
+                            expression_depth=analysis["expression_depth"],
+                            operator_count=analysis["operator_count"],
+                            field_count=analysis["field_count"],
+                            complexity_score=analysis["complexity_score"],
+                            generation_number=expr.generation_number + 1
+                        )
+                        db.add(new_expr)
+                        
+                        log = ProjectLog(
+                            project_id=project_id,
+                            level="INFO",
+                            message=f"Turnover optimization: queued '{smoothed_expr[:30]}...' from parent '{expr.expression_text[:30]}...'. Rationale: {proposal.explanation[:80]}"
+                        )
+                        db.add(log)
+            await db.commit()

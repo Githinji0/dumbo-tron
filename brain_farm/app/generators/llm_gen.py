@@ -1,72 +1,48 @@
 import logging
 import re
-import httpx
 from typing import List, Dict, Any, Tuple
 from brain_farm.app.generators.base import BaseGenerator
-from brain_farm.app.core.config import settings
 from brain_farm.app.evaluators.validator import FormulaValidator
+from brain_farm.app.ai.manager import ai_manager
 
 logger = logging.getLogger("brain_farm.llm_generator")
 
 class LLMGenerator(BaseGenerator):
-    """Accesses LLMs (OpenAI/Gemini) or utilizes a rule-based quantitative parser when keys are absent."""
+    """Accesses AI layer via AIManager or utilizes a rule-based quantitative parser when AI is unavailable."""
 
     def __init__(self, allowed_fields: List[str]):
         super().__init__(allowed_fields)
-        self.headers_openai = {
-            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        self.headers_gemini = {
-            "x-goog-api-key": settings.GEMINI_API_KEY,
-            "Content-Type": "application/json"
-        }
 
     async def optimize_alpha(self, expression: str, reason: str) -> Tuple[str, str]:
         """
-        Submits an alpha candidate and its validation failures to LLM for optimizations.
+        Submits an alpha candidate and its validation failures to AI for optimizations.
         Returns Tuple[optimized_expression, explanation_summary]
         """
-        # Validate LLM availability, else use our heuristic optimization engine
-        if not settings.OPENAI_API_KEY and not settings.GEMINI_API_KEY:
+        if not ai_manager.is_available("near_miss"):
             return self._heuristic_local_optimization(expression, reason)
 
-        # 1. OpenAI completion route if configured
-        if settings.OPENAI_API_KEY:
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    prompt = self._compile_optimization_prompt(expression, reason)
-                    payload = {
-                        "model": "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": "You are a quantitative researcher on WorldQuant BRAIN. You optimize alpha expression formulas to improve metrics like Sharpe, Fitness, and Turnover."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.2
-                    }
-                    res = await client.post("https://api.openai.com/v1/chat/completions", headers=self.headers_openai, json=payload)
-                    if res.status_code == 200:
-                        content = res.json()["choices"][0]["message"]["content"]
-                        return self._parse_llm_response(content, expression)
-            except Exception as e:
-                logger.error(f"OpenAI completion call failed: {e}. Falling back to heuristics.")
+        prompt = self._compile_optimization_prompt(expression, reason)
+        system_prompt = (
+            "You are a quantitative researcher on WorldQuant BRAIN. "
+            "You optimize alpha expression formulas to improve metrics like Sharpe, Fitness, and Turnover."
+        )
 
-        # 2. Gemini execution route if configured
-        if settings.GEMINI_API_KEY:
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    prompt = self._compile_optimization_prompt(expression, reason)
-                    payload = {
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": 0.2}
-                    }
-                    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-                    res = await client.post(url, headers=self.headers_gemini, json=payload)
-                    if res.status_code == 200:
-                        content = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-                        return self._parse_llm_response(content, expression)
-            except Exception as e:
-                logger.error(f"Gemini API execution failed: {e}. Falling back to heuristics.")
+        try:
+            data, err = await ai_manager.execute_structured_request(
+                feature_name="near_miss",
+                prompt=f"{prompt}\n\nPlease respond strictly in JSON: {{\"optimized_formula\": \"...\", \"explanation\": \"...\"}}",
+                system_prompt=system_prompt,
+                temperature=0.2
+            )
+            if data and "optimized_formula" in data:
+                opt_expr = data["optimized_formula"].strip()
+                expl = data.get("explanation", "AI optimization applied.")
+                # Validate proposed formula
+                ok, _ = FormulaValidator.validate(opt_expr, self.allowed_fields)
+                if ok:
+                    return opt_expr, expl
+        except Exception as e:
+            logger.warning(f"LLMGenerator optimization failed: {e}. Falling back to heuristics.")
 
         return self._heuristic_local_optimization(expression, reason)
 

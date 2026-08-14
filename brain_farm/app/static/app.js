@@ -76,11 +76,21 @@ document.addEventListener("DOMContentLoaded", () => {
       stopAnalyticsPolling();
       updateLogsViewWarnings();
       startLogsTabPolling();
+    } else if (viewId === "ai-lab") {
+      stopQueuePolling();
+      stopAnalyticsPolling();
+      stopLogsTabPolling();
+      loadAiLabData();
+    } else if (viewId === "ai-settings") {
+      stopQueuePolling();
+      stopAnalyticsPolling();
+      stopLogsTabPolling();
+      loadAiSettingsData();
     } else if (viewId === "ai-assistant") {
       stopQueuePolling();
       stopAnalyticsPolling();
       stopLogsTabPolling();
-      loadAiConfig();
+      loadAiAssistantChat();
     } else {
       stopQueuePolling();
       stopAnalyticsPolling();
@@ -328,11 +338,33 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btnSubmitToRegistry").addEventListener("click", handleRegistrySubmission);
     document.getElementById("btnSubmitAllToRegistry").addEventListener("click", handleRegistrySubmissionAll);
 
-    // AI Assistant Handlers
-    document.getElementById("btnSaveAiKey").addEventListener("click", handleSaveAiConfig);
-    document.getElementById("btnClearAiChat").addEventListener("click", handleClearAiChat);
-    document.getElementById("btnSendAiMessage").addEventListener("click", handleSendAiMessage);
-    document.getElementById("aiProviderSelect").addEventListener("change", handleAiProviderChange);
+    // AI Integration Handlers
+    const btnSaveAi = document.getElementById("btnSaveAiSettings");
+    if (btnSaveAi) btnSaveAi.addEventListener("click", handleSaveAiSettings);
+
+    const btnValAi = document.getElementById("btnValidateAiSettingsKey");
+    if (btnValAi) btnValAi.addEventListener("click", handleValidateAiSettingsKey);
+
+    const provSel = document.getElementById("aiSettingsProviderSelect");
+    if (provSel) provSel.addEventListener("change", handleAiSettingsProviderChange);
+
+    const btnRefDir = document.getElementById("btnRefreshDirectorPlan");
+    if (btnRefDir) btnRefDir.addEventListener("click", loadAiLabDirectorPlan);
+
+    const btnGenHypo = document.getElementById("btnGenerateHypothesis");
+    if (btnGenHypo) btnGenHypo.addEventListener("click", handleGenerateHypothesis);
+
+    const btnQueueHypo = document.getElementById("btnQueueHypothesisAlphas");
+    if (btnQueueHypo) btnQueueHypo.addEventListener("click", handleQueueHypothesisAlphas);
+
+    const btnRunCritic = document.getElementById("btnRunCriticReview");
+    if (btnRunCritic) btnRunCritic.addEventListener("click", handleRunCriticReview);
+
+    const btnRefMem = document.getElementById("btnRefreshMemory");
+    if (btnRefMem) btnRefMem.addEventListener("click", loadResearchMemoryTable);
+
+    const btnSendAi = document.getElementById("btnSendAiMessage");
+    if (btnSendAi) btnSendAi.addEventListener("click", handleSendAiMessage);
   }
 
   async function handleSignIn() {
@@ -879,6 +911,16 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("statQueuePending").innerText = data.pending_count;
       document.getElementById("statQueueRunning").innerText = data.running_count;
 
+      const runningIconWrapper = document.getElementById("statQueueRunningIconWrapper");
+      if (runningIconWrapper) {
+        if (data.running_count > 0) {
+          runningIconWrapper.innerHTML = '<i data-lucide="loader-2" class="spin" style="color:var(--success);"></i>';
+        } else {
+          runningIconWrapper.innerHTML = '<i data-lucide="activity" style="color:var(--text-secondary);"></i>';
+        }
+        if (window.lucide) window.lucide.createIcons();
+      }
+
       // When running count drops to 0 (simulations just finished), refresh analytics
       if (lastRunningCount > 0 && data.running_count === 0) {
         loadAnalyticsData();
@@ -898,7 +940,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const tr = document.createElement("tr");
 
         const idTd = document.createElement("td");
-        idTd.innerHTML = `<code>${s.sim_id}</code>`;
+        idTd.innerHTML = `<code style="cursor:pointer;" title="Click to view full simulation diagnostics" onclick="window.showSimulationDiagnostics(${s.db_id})">${s.sim_id} 🔍</code>`;
 
         const exprTd = document.createElement("td");
         exprTd.style.fontFamily = "monospace";
@@ -906,15 +948,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const statusTd = document.createElement("td");
         const statusLower = s.status.toLowerCase();
-        statusTd.innerHTML = `<span class="status-pill ${statusLower}">${s.status}</span>`;
+        if (s.status === "NO_VALID_METRICS") {
+          statusTd.innerHTML = `<span class="status-pill warning" style="background:rgba(255,160,0,0.15); color:#ffa000; border:1px solid #ffa000; cursor:pointer;" onclick="window.showSimulationDiagnostics(${s.db_id})">NO VALID METRICS 🔍</span>`;
+        } else {
+          statusTd.innerHTML = `<span class="status-pill ${statusLower}" style="cursor:pointer;" onclick="window.showSimulationDiagnostics(${s.db_id})">${s.status}</span>`;
+        }
 
         const checkTd = document.createElement("td");
         checkTd.innerText = s.last_checked;
 
         const detailTd = document.createElement("td");
-        detailTd.style.color = statusLower === "error" ? "var(--error)" : "var(--text-secondary)";
+        detailTd.style.color = statusLower === "error" ? "var(--error)" : (s.status === "NO_VALID_METRICS" ? "var(--warning)" : "var(--text-secondary)");
         if (s.status === "ERROR" && s.category && s.category !== "NORMAL") {
           detailTd.innerHTML = `<code style="color: #ff5252; font-size: 0.85em; background: rgba(255, 82, 82, 0.1); padding: 2px 6px; border-radius: 4px; margin-right: 6px; border: 1px solid rgba(255, 82, 82, 0.2);">${s.category}</code> ${s.message}`;
+        } else if (s.status === "NO_VALID_METRICS") {
+          detailTd.innerHTML = `<code style="color: #ffa000; font-size: 0.85em; background: rgba(255, 160, 0, 0.1); padding: 2px 6px; border-radius: 4px; margin-right: 6px; border: 1px solid rgba(255, 160, 0, 0.3);">EMPTY_IS_BLOCK</code> No portfolio metrics returned from simulation`;
         } else {
           detailTd.innerText = s.message;
         }
@@ -1661,9 +1709,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const type = node.transformation_type || node.mutation_type || "MUTATION";
         traceText += `\n       ↓ [${type}]\n\n`;
       }
+      const sText = node.sharpe !== null && node.sharpe !== undefined ? Number(node.sharpe).toFixed(3) : "N/A";
+      const fText = node.fitness !== null && node.fitness !== undefined ? Number(node.fitness).toFixed(3) : "N/A";
+      const tText = node.turnover !== null && node.turnover !== undefined ? Number(node.turnover).toFixed(2) + "%" : "N/A";
       traceText += `${node.generator || "Base"} (ID: ${node.db_id})
   Expr: ${node.expression}
-  Sharpe: ${node.sharpe.toFixed(3)} | Fitness: ${node.fitness.toFixed(3)} | Turnover: ${node.turnover.toFixed(2)}%`;
+  Sharpe: ${sText} | Fitness: ${fText} | Turnover: ${tText}`;
     });
     document.getElementById("inspectEvolutionTrace").innerText = traceText || "No evolutionary lineage path identified.";
 
@@ -1793,13 +1844,18 @@ document.addEventListener("DOMContentLoaded", () => {
         exprTd.innerText = p.expression;
 
         const sharpeTd = document.createElement("td");
-        sharpeTd.innerText = p.sharpe;
-
         const fitnessTd = document.createElement("td");
-        fitnessTd.innerText = p.fitness;
-
         const turnTd = document.createElement("td");
-        turnTd.innerText = `${p.turnover}%`;
+
+        if (p.sharpe === null || p.sharpe === undefined || !p.has_valid_metrics) {
+          sharpeTd.innerHTML = `<span class="badge" style="background:rgba(255,160,0,0.15); color:#ffa000; cursor:pointer;" onclick="event.stopPropagation(); window.showSimulationDiagnostics(${p.sim_id || p.db_id})">NO VALID METRICS 🔍</span>`;
+          fitnessTd.innerText = "N/A";
+          turnTd.innerText = "N/A";
+        } else {
+          sharpeTd.innerText = typeof p.sharpe === "number" ? p.sharpe.toFixed(3) : p.sharpe;
+          fitnessTd.innerText = typeof p.fitness === "number" ? p.fitness.toFixed(3) : p.fitness;
+          turnTd.innerText = typeof p.turnover === "number" ? `${p.turnover.toFixed(2)}%` : `${p.turnover}%`;
+        }
 
         const tierTd = document.createElement("td");
         tierTd.innerHTML = `<span class="badge" style="background:var(--bg-hover); color:#40c4ff;">Tier ${p.candidate_tier}</span>`;
@@ -1960,86 +2016,433 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // === AI Assistant Implementation ===
+  // ==========================================
+  // === AI SUBSYSTEM IMPLEMENTATION ===
+  // ==========================================
+
+  let currentGeneratedHypothesis = null;
   let aiChatHistory = [];
 
-  function loadAiConfig() {
-    const provider = localStorage.getItem("dumbo_ai_provider") || "gemini";
-    const apiKey = localStorage.getItem("dumbo_ai_apikey") || "";
-    const model = localStorage.getItem("dumbo_ai_model") || (provider === "gemini" ? "gemini-1.5-flash" : "gpt-4o-mini");
+  // --- AI Settings ---
+  async function loadAiSettingsData() {
+    try {
+      const res = await fetch("/api/ai/status", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const provSelect = document.getElementById("aiSettingsProviderSelect");
+        if (provSelect) provSelect.value = data.provider || "gemini";
+        
+        const modelInput = document.getElementById("aiSettingsModelInput");
+        if (modelInput) modelInput.value = data.model || "";
 
-    document.getElementById("aiProviderSelect").value = provider;
-    document.getElementById("aiApiKeyInput").value = apiKey;
-    document.getElementById("aiModelInput").value = model;
+        // Checkboxes
+        const feats = data.enabled_features || {};
+        if (document.getElementById("flagHypothesis")) document.getElementById("flagHypothesis").checked = feats.hypothesis !== false;
+        if (document.getElementById("flagFailure")) document.getElementById("flagFailure").checked = feats.failure_analysis !== false;
+        if (document.getElementById("flagNearMiss")) document.getElementById("flagNearMiss").checked = feats.near_miss !== false;
+        if (document.getElementById("flagTurnover")) document.getElementById("flagTurnover").checked = feats.turnover_opt !== false;
+        if (document.getElementById("flagDirector")) document.getElementById("flagDirector").checked = feats.director !== false;
+        if (document.getElementById("flagCritic")) document.getElementById("flagCritic").checked = feats.critic !== false;
 
-    // Load Chat History
+        // Status box
+        updateAiSettingsStatusBox(data);
+      }
+
+      // Usage stats
+      const uRes = await fetch("/api/ai/usage", { credentials: "include" });
+      if (uRes.ok) {
+        const uData = await uRes.json();
+        const dailyVal = document.getElementById("aiDailyCallsVal");
+        if (dailyVal) dailyVal.innerText = `${uData.daily_calls} / ${uData.daily_budget_limit}`;
+        
+        const costVal = document.getElementById("aiEstimatedCostVal");
+        if (costVal) costVal.innerText = `$${Number(uData.estimated_cost_usd || 0).toFixed(4)}`;
+      }
+    } catch (err) {
+      console.error("Failed to load AI settings:", err);
+    }
+  }
+
+  function updateAiSettingsStatusBox(status) {
+    const box = document.getElementById("aiSettingsStatusBox");
+    const msg = document.getElementById("aiSettingsStatusMsg");
+    if (!box || !msg) return;
+
+    if (!status.configured) {
+      box.style.borderLeftColor = "var(--text-secondary)";
+      msg.innerHTML = `<strong>○ AI Not Configured (Optional)</strong>: Dumbo-Tron continues to operate normally in <em>Deterministic Research Mode</em>.`;
+    } else if (status.valid) {
+      box.style.borderLeftColor = "var(--primary-accent)";
+      msg.innerHTML = `<strong>● Connected (${status.provider.toUpperCase()} - ${status.model})</strong>: AI-enhanced research mode is fully active.`;
+    } else if (status.state === "AI_RATE_LIMITED") {
+      box.style.borderLeftColor = "var(--warning)";
+      msg.innerHTML = `<strong>⚠ Rate Limited</strong>: AI provider quota or rate limit reached. Research automatically continues deterministically.`;
+    } else {
+      box.style.borderLeftColor = "var(--error)";
+      msg.innerHTML = `<strong>⚠ API Key Invalid / Rejected</strong>: ${status.message || "Please verify your credentials."} System remains in deterministic mode.`;
+    }
+  }
+
+  function handleAiSettingsProviderChange(e) {
+    const prov = e.target.value;
+    const modelInput = document.getElementById("aiSettingsModelInput");
+    if (!modelInput) return;
+    if (prov === "gemini") {
+      modelInput.placeholder = "e.g. gemini-1.5-flash";
+      modelInput.value = "gemini-1.5-flash";
+    } else {
+      modelInput.placeholder = "e.g. gpt-4o-mini";
+      modelInput.value = "gpt-4o-mini";
+    }
+  }
+
+  async function handleSaveAiSettings() {
+    const prov = document.getElementById("aiSettingsProviderSelect")?.value || "gemini";
+    const apiKey = document.getElementById("aiSettingsApiKeyInput")?.value.trim();
+    const model = document.getElementById("aiSettingsModelInput")?.value.trim();
+
+    const features = {
+      hypothesis: document.getElementById("flagHypothesis")?.checked ?? true,
+      failure_analysis: document.getElementById("flagFailure")?.checked ?? true,
+      near_miss: document.getElementById("flagNearMiss")?.checked ?? true,
+      turnover_opt: document.getElementById("flagTurnover")?.checked ?? true,
+      director: document.getElementById("flagDirector")?.checked ?? true,
+      critic: document.getElementById("flagCritic")?.checked ?? true,
+      summary: true
+    };
+
+    const payload = {
+      provider: prov,
+      model: model || (prov === "gemini" ? "gemini-1.5-flash" : "gpt-4o-mini"),
+      is_enabled: true,
+      features: features
+    };
+
+    if (apiKey) {
+      payload.api_key = apiKey;
+    }
+
+    try {
+      const res = await fetch("/api/ai/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        // Clear input to prevent any persistent memory display of key
+        const keyInput = document.getElementById("aiSettingsApiKeyInput");
+        if (keyInput) keyInput.value = "";
+        updateAiSettingsStatusBox(data.status);
+        alert("AI Settings successfully saved.");
+      } else {
+        alert(`Failed to save AI settings: ${data.detail || data.message}`);
+      }
+    } catch (err) {
+      alert(`Network error saving AI settings: ${err.message}`);
+    }
+  }
+
+  async function handleValidateAiSettingsKey() {
+    const statusMsg = document.getElementById("aiSettingsStatusMsg");
+    if (statusMsg) statusMsg.innerHTML = "<em>Validating provider connection...</em>";
+
+    const apiKey = document.getElementById("aiSettingsApiKeyInput")?.value.trim();
+    const prov = document.getElementById("aiSettingsProviderSelect")?.value || "gemini";
+    const model = document.getElementById("aiSettingsModelInput")?.value.trim();
+
+    const payload = {};
+    if (apiKey) payload.api_key = apiKey;
+    if (prov) payload.provider = prov;
+    if (model) payload.model = model;
+
+    try {
+      const res = await fetch("/api/ai/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        updateAiSettingsStatusBox(data);
+      } else {
+        updateAiSettingsStatusBox({ configured: true, valid: false, message: data.message || data.detail });
+      }
+    } catch (err) {
+      if (statusMsg) statusMsg.innerText = `Validation request error: ${err.message}`;
+    }
+  }
+
+  // --- AI Research Lab ---
+  async function loadAiLabData() {
+    await updateAiLabStatusPill();
+    await loadAiLabDirectorPlan();
+    await loadResearchMemoryTable();
+  }
+
+  async function updateAiLabStatusPill() {
+    const pill = document.getElementById("aiLabPill");
+    const text = document.getElementById("aiLabPillText");
+    if (!pill || !text) return;
+
+    try {
+      const res = await fetch("/api/ai/status", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.valid) {
+          pill.className = "status-pill complete";
+          text.innerText = `● Mode B (AI-Enhanced: ${data.provider.toUpperCase()})`;
+        } else if (data.configured) {
+          pill.className = "status-pill error";
+          text.innerText = `⚠ Mode A (AI Invalid - Fallback Active)`;
+        } else {
+          pill.className = "status-pill paused";
+          text.innerText = `○ Mode A (Deterministic Research)`;
+        }
+      }
+    } catch (err) {
+      pill.className = "status-pill paused";
+      text.innerText = `Mode A (Deterministic)`;
+    }
+    if (window.lucide) lucide.createIcons();
+  }
+
+  async function loadAiLabDirectorPlan() {
+    const box = document.getElementById("directorSummaryBox");
+    const bars = document.getElementById("directorAllocationBars");
+    if (!box || !bars) return;
+
+    box.innerHTML = "<em>Analyzing empirical research memory and synthesizing strategic allocation...</em>";
+    bars.innerHTML = "";
+
+    try {
+      const pid = currentProject ? currentProject.id : null;
+      const url = pid ? `/api/ai/director/plan?project_id=${pid}` : `/api/ai/director/plan`;
+      const res = await fetch(url, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const plan = data.plan;
+        box.innerHTML = `<strong>Strategic Assessment</strong>: ${plan.strategic_summary}`;
+
+        // Render allocation bars
+        const alloc = plan.recommended_allocation || {};
+        const total = Object.values(alloc).reduce((a, b) => a + b, 0) || 100;
+
+        for (const [fam, count] of Object.entries(alloc)) {
+          const pct = Math.round((count / total) * 100);
+          const barDiv = document.createElement("div");
+          barDiv.style.display = "flex";
+          barDiv.style.alignItems = "center";
+          barDiv.style.gap = "10px";
+          barDiv.style.fontSize = "12px";
+          barDiv.innerHTML = `
+            <span style="width: 90px; font-weight: 600; color: var(--text-primary);">${fam}</span>
+            <div style="flex: 1; height: 8px; background: var(--bg-primary); border-radius: 4px; overflow: hidden;">
+              <div style="width: ${pct}%; height: 100%; background: var(--primary-accent); border-radius: 4px;"></div>
+            </div>
+            <span style="width: 45px; text-align: right; color: var(--text-secondary);">${pct}% (${count})</span>
+          `;
+          bars.appendChild(barDiv);
+        }
+      }
+    } catch (err) {
+      box.innerText = `Failed to load Director plan: ${err.message}`;
+    }
+  }
+
+  async function handleGenerateHypothesis() {
+    const family = document.getElementById("aiHypothesisFamilySelect")?.value || "VALUE";
+    const box = document.getElementById("aiHypothesisDisplayBox");
+    const queueBtn = document.getElementById("btnQueueHypothesisAlphas");
+    if (!box) return;
+
+    box.innerHTML = "<em>Synthesizing structured economic hypothesis...</em>";
+    if (queueBtn) queueBtn.style.display = "none";
+
+    try {
+      const res = await fetch("/api/ai/hypothesis/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ family: family })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        currentGeneratedHypothesis = data.hypothesis;
+        const h = data.hypothesis;
+        box.innerHTML = `
+          <div style="margin-bottom: 8px;"><strong style="color: var(--primary-accent);">${h.family} Hypothesis:</strong> ${h.hypothesis}</div>
+          <div style="display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-secondary); font-size: 11px; margin-bottom: 8px;">
+            <span><strong>Horizon:</strong> ${h.horizon}</span>
+            <span><strong>Priority:</strong> ${(h.priority * 100).toFixed(0)}%</span>
+            <span><strong>Preferred Fields:</strong> ${(h.preferred_fields || []).join(", ") || "Standard"}</span>
+            <span><strong>Transformations:</strong> ${(h.suggested_transformations || []).join(", ") || "None"}</span>
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 6px;">
+            <em>Rationale:</em> ${h.reasoning || "Empirical statistical persistence."}
+          </div>
+        `;
+        if (queueBtn) queueBtn.style.display = "inline-flex";
+      } else {
+        box.innerText = "Failed to generate hypothesis.";
+      }
+    } catch (err) {
+      box.innerText = `Error generating hypothesis: ${err.message}`;
+    }
+    if (window.lucide) lucide.createIcons();
+  }
+
+  async function handleQueueHypothesisAlphas() {
+    if (!currentGeneratedHypothesis) return;
+    if (!currentProject) {
+      alert("Please select an active project in the sidebar first.");
+      return;
+    }
+
+    try {
+      const payload = {
+        project_id: currentProject.id,
+        family: currentGeneratedHypothesis.family,
+        hypothesis_text: currentGeneratedHypothesis.hypothesis,
+        horizon: currentGeneratedHypothesis.horizon,
+        preferred_fields: currentGeneratedHypothesis.preferred_fields,
+        suggested_transformations: currentGeneratedHypothesis.suggested_transformations,
+        count: 5
+      };
+
+      const res = await fetch("/api/ai/hypothesis/synthesize-and-queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`Success: Queued ${data.queued_count} hypothesis-derived alphas to project '${currentProject.name}'!`);
+      } else {
+        alert(`Failed: ${data.message || data.detail}`);
+      }
+    } catch (err) {
+      alert(`Network error: ${err.message}`);
+    }
+  }
+
+  async function handleRunCriticReview() {
+    const expr = document.getElementById("criticFormulaInput")?.value.trim();
+    const box = document.getElementById("criticResultBox");
+    if (!box) return;
+
+    if (!expr) {
+      alert("Please enter a formula expression to review.");
+      return;
+    }
+
+    box.innerHTML = "<em>Adversarial critic is stress-testing candidate...</em>";
+
+    try {
+      const payload = {
+        expression: expr,
+        sharpe: 1.35,
+        fitness: 1.05,
+        turnover: 0.45,
+        stability_score: 0.85,
+        robustness_score: 0.80
+      };
+
+      const res = await fetch("/api/ai/critic/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const rev = data.review;
+        const badgeColor = rev.risk_level === "LOW" ? "var(--primary-accent)" : (rev.risk_level === "MODERATE" ? "var(--warning)" : "var(--error)");
+        box.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-weight: 700; color: ${badgeColor};">Risk Assessment: ${rev.risk_level}</span>
+            <span style="color: var(--text-secondary); font-size: 11px;">Overfitting Prob: ${(rev.overfitting_probability * 100).toFixed(0)}%</span>
+          </div>
+          <div style="margin-bottom: 8px;">${rev.critique}</div>
+          <div style="font-size: 11px; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 6px;">
+            <strong>Recommendation:</strong> ${rev.recommendation} | <strong>Suggested Stress Tests:</strong> ${(rev.suggested_stress_tests || []).join("; ")}
+          </div>
+        `;
+      } else {
+        box.innerText = "Critic evaluation returned no data.";
+      }
+    } catch (err) {
+      box.innerText = `Critic error: ${err.message}`;
+    }
+  }
+
+  async function loadResearchMemoryTable() {
+    const tbody = document.getElementById("researchMemoryTableBody");
+    if (!tbody) return;
+
+    try {
+      const pid = currentProject ? currentProject.id : null;
+      const url = pid ? `/api/ai/memory?project_id=${pid}` : `/api/ai/memory`;
+      const res = await fetch(url, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const families = data.memory?.families || {};
+        tbody.innerHTML = "";
+
+        const entries = Object.entries(families);
+        if (entries.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No empirical records yet.</td></tr>`;
+          return;
+        }
+
+        for (const [fam, stats] of entries) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><strong>${fam}</strong></td>
+            <td>${stats.total_experiments}</td>
+            <td>${(stats.pass_rate * 100).toFixed(1)}%</td>
+            <td><span class="status-pill complete" style="font-size: 11px; padding: 2px 8px;">${(stats.promising_rate * 100).toFixed(1)}%</span></td>
+          `;
+          tbody.appendChild(tr);
+        }
+      }
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Error loading memory.</td></tr>`;
+    }
+  }
+
+  // --- AI Assistant Chat ---
+  function loadAiAssistantChat() {
     const historyJson = localStorage.getItem("dumbo_ai_chat_history");
     if (historyJson) {
       try {
         aiChatHistory = JSON.parse(historyJson);
-        renderAiChat();
-      } catch (err) {
+      } catch (e) {
         aiChatHistory = [];
       }
     } else {
       aiChatHistory = [];
-      renderAiChat();
     }
-  }
-
-  function handleAiProviderChange(e) {
-    const provider = e.target.value;
-    const modelInput = document.getElementById("aiModelInput");
-    if (provider === "gemini") {
-      modelInput.placeholder = "e.g. gemini-1.5-flash";
-      if (!modelInput.value || modelInput.value.startsWith("gpt")) {
-        modelInput.value = "gemini-1.5-flash";
-      }
-    } else {
-      modelInput.placeholder = "e.g. gpt-4o-mini";
-      if (!modelInput.value || modelInput.value.startsWith("gemini")) {
-        modelInput.value = "gpt-4o-mini";
-      }
-    }
-  }
-
-  function handleSaveAiConfig() {
-    const provider = document.getElementById("aiProviderSelect").value;
-    const apiKey = document.getElementById("aiApiKeyInput").value.trim();
-    const model = document.getElementById("aiModelInput").value.trim();
-
-    localStorage.setItem("dumbo_ai_provider", provider);
-    localStorage.setItem("dumbo_ai_apikey", apiKey);
-    localStorage.setItem("dumbo_ai_model", model);
-
-    const badge = document.getElementById("aiSavedBadge");
-    badge.style.display = "block";
-    if (window.lucide) lucide.createIcons();
-    setTimeout(() => {
-      badge.style.display = "none";
-    }, 3000);
-  }
-
-  function handleClearAiChat() {
-    aiChatHistory = [];
-    localStorage.removeItem("dumbo_ai_chat_history");
     renderAiChat();
   }
 
   function renderAiChat() {
     const container = document.getElementById("aiChatWindow");
     const placeholder = document.getElementById("aiChatPlaceholder");
+    if (!container) return;
 
-    // Clear messages
     const msgDivs = container.querySelectorAll(".ai-msg-block");
     msgDivs.forEach(div => div.remove());
 
     if (aiChatHistory.length === 0) {
-      placeholder.style.display = "block";
+      if (placeholder) placeholder.style.display = "block";
       return;
     }
 
-    placeholder.style.display = "none";
+    if (placeholder) placeholder.style.display = "none";
 
     aiChatHistory.forEach(msg => {
       const msgBlock = document.createElement("div");
@@ -2055,7 +2458,7 @@ document.addEventListener("DOMContentLoaded", () => {
       header.style.textTransform = "uppercase";
       header.style.color = "var(--text-secondary)";
       header.style.alignSelf = msg.role === "user" ? "flex-end" : "flex-start";
-      header.innerText = msg.role === "user" ? "You" : "Assistant";
+      header.innerText = msg.role === "user" ? "You" : "AI Assistant";
 
       const bubble = document.createElement("div");
       bubble.style.padding = "10px 14px";
@@ -2084,23 +2487,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function handleSendAiMessage() {
-    const prompt = document.getElementById("aiMessageInput").value.trim();
+    const input = document.getElementById("aiMessageInput");
+    const prompt = input?.value.trim();
     if (!prompt) return;
-
-    const apiKey = localStorage.getItem("dumbo_ai_apikey");
-    if (!apiKey) {
-      showAiError("Missing API Key. Please save a valid API key configuration first.");
-      return;
-    }
-
-    const provider = localStorage.getItem("dumbo_ai_provider") || "gemini";
-    const model = localStorage.getItem("dumbo_ai_model") || (provider === "gemini" ? "gemini-1.5-flash" : "gpt-4o-mini");
 
     hideAiError();
 
     // 1. Add User Message
     aiChatHistory.push({ role: "user", content: prompt });
-    document.getElementById("aiMessageInput").value = "";
+    input.value = "";
     renderAiChat();
 
     // 2. Add Typing Indicator
@@ -2109,7 +2504,7 @@ document.addEventListener("DOMContentLoaded", () => {
     indicatorBlock.className = "ai-msg-block typing-indicator";
     indicatorBlock.style.alignSelf = "flex-start";
     indicatorBlock.innerHTML = `
-      <span style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary);">Assistant</span>
+      <span style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary);">AI Assistant</span>
       <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 10px 14px; border-radius: 8px; color: var(--text-secondary); width: fit-content;">
         Thinking...
       </div>
@@ -2118,62 +2513,159 @@ document.addEventListener("DOMContentLoaded", () => {
     container.scrollTop = container.scrollHeight;
 
     try {
-      let botResponseText = "";
-
-      if (provider === "gemini") {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        });
-        const data = await response.json();
-        if (response.ok) {
-          botResponseText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No text return from Gemini API.";
-        } else {
-          throw new Error(data?.error?.message || "Google API Error");
-        }
-      } else {
-        const url = `https://api.openai.com/v1/chat/completions`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [{ role: "user", content: prompt }]
-          })
-        });
-        const data = await response.json();
-        if (response.ok) {
-          botResponseText = data?.choices?.[0]?.message?.content || "No message return from OpenAI API.";
-        } else {
-          throw new Error(data?.error?.message || "OpenAI API Error");
-        }
-      }
-
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ message: prompt })
+      });
+      const data = await res.json();
       indicatorBlock.remove();
-      aiChatHistory.push({ role: "assistant", content: botResponseText });
+
+      const botReply = data.reply || data.message || "Analysis complete.";
+      aiChatHistory.push({ role: "assistant", content: botReply });
       localStorage.setItem("dumbo_ai_chat_history", JSON.stringify(aiChatHistory));
       renderAiChat();
     } catch (err) {
       indicatorBlock.remove();
-      showAiError(`API Error: ${err.message}`);
+      showAiError(`Chat Error: ${err.message}`);
     }
   }
 
   function showAiError(msg) {
     const errBanner = document.getElementById("aiErrorBanner");
-    errBanner.innerText = msg;
-    errBanner.style.display = "block";
+    if (errBanner) {
+      errBanner.innerText = msg;
+      errBanner.style.display = "block";
+    }
   }
 
   function hideAiError() {
     const errBanner = document.getElementById("aiErrorBanner");
-    errBanner.style.display = "none";
+    if (errBanner) {
+      errBanner.style.display = "none";
+    }
+  }
+
+  // --- Zero-Metric Simulation Diagnostics Modal Handler ---
+  window.showSimulationDiagnostics = async function(simId) {
+    if (!simId) return;
+    try {
+      const res = await fetch(`/api/simulations/${simId}/diagnostics`);
+      if (!res.ok) throw new Error("Could not fetch simulation diagnostics");
+      const data = await res.json();
+
+      document.getElementById("diagFormulaText").innerText = data.expression || "-";
+      document.getElementById("diagSignalTypeBadge").innerText = data.signal_type || "RAW_SIGNAL";
+      
+      const catBadge = document.getElementById("diagCategoryBadge");
+      catBadge.innerText = data.diagnostic_category || "NORMAL";
+      if (data.diagnostic_category === "NO_VALID_METRICS" || data.evaluation_status === "TECHNICAL_FAILURE") {
+        catBadge.style.background = "rgba(255, 160, 0, 0.15)";
+        catBadge.style.color = "#ffa000";
+        catBadge.style.borderColor = "#ffa000";
+      } else if (data.diagnostic_category === "SIMULATION_ERROR" || data.simulation_status === "ERROR") {
+        catBadge.style.background = "rgba(255, 82, 82, 0.15)";
+        catBadge.style.color = "var(--error)";
+        catBadge.style.borderColor = "var(--error)";
+      } else {
+        catBadge.style.background = "rgba(0, 230, 118, 0.15)";
+        catBadge.style.color = "var(--success)";
+        catBadge.style.borderColor = "var(--success)";
+      }
+
+      const diag = data.diagnostics || {};
+      const simStatusEl = document.getElementById("diagSimStatus");
+      const portStatusEl = document.getElementById("diagPortfolioStatus");
+      const metricStatusEl = document.getElementById("diagMetricStatus");
+      const evalStatusEl = document.getElementById("diagEvaluationStatus");
+
+      const remoteStatus = data.remote_status || data.simulation_status || "UNKNOWN";
+      const portStatus = data.portfolio_status || (diag.portfolio_availability ? "AVAILABLE" : "EMPTY");
+      const metricStatus = data.metrics_status || (data.has_valid_metrics ? "AVAILABLE" : "UNAVAILABLE");
+      const evalStatus = data.evaluation_status || (data.has_valid_metrics ? "EVALUATED" : "TECHNICAL_FAILURE");
+
+      if (simStatusEl) simStatusEl.innerText = remoteStatus;
+      if (portStatusEl) {
+        portStatusEl.innerText = portStatus;
+        portStatusEl.style.color = portStatus === "PORTFOLIO_AVAILABLE" || portStatus === "AVAILABLE" ? "var(--success)" : "var(--warning)";
+      }
+      if (metricStatusEl) {
+        metricStatusEl.innerText = metricStatus;
+        metricStatusEl.style.color = metricStatus === "METRICS_AVAILABLE" || metricStatus === "AVAILABLE" ? "var(--success)" : "var(--error)";
+      }
+      if (evalStatusEl) {
+        evalStatusEl.innerText = evalStatus.replace("_", " ");
+        evalStatusEl.style.color = evalStatus === "EVALUATED" ? "var(--success)" : "#ffa000";
+      }
+
+      const parserPathLabel = document.getElementById("diagParserPathLabel");
+      if (parserPathLabel) {
+        parserPathLabel.innerText = data.parser_status && data.parser_status !== "NONE" ? `(Path: ${data.parser_status})` : "";
+      }
+
+      const rawPre = document.getElementById("diagRawStructureContent");
+      if (rawPre) {
+        const rawObj = {
+          remote_status: remoteStatus,
+          portfolio_status: portStatus,
+          metrics_status: metricStatus,
+          evaluation_status: evalStatus,
+          parser_path_used: data.parser_status || "NONE",
+          trade_availability: diag.trade_availability,
+          top_level_keys: diag.top_level_keys || Object.keys(data.raw_response_structure || {}),
+          relevant_nested_keys: diag.relevant_nested_keys || {},
+          raw_response_sample: data.raw_response_structure || {}
+        };
+        rawPre.innerText = JSON.stringify(rawObj, null, 2);
+      }
+
+      const msgCard = document.getElementById("diagDetailMessageCard");
+      let explanation = "";
+      if (evalStatus === "TECHNICAL_FAILURE" || data.simulation_status === "NO_VALID_METRICS") {
+        msgCard.style.borderLeft = "3px solid #ffa000";
+        explanation = `
+          <strong>Diagnostic Trace:</strong> Simulation completed on WorldQuant BRAIN (Remote Status: <code>${remoteStatus}</code>), but no usable backtest portfolio trade metrics were generated.<br>
+          <strong>Portfolio Status:</strong> <code>${portStatus}</code> | <strong>Metrics Status:</strong> <code>${metricStatus}</code><br>
+          <strong>Root Cause & Diagnosis:</strong> ${data.failure_reason || diag.message || "Trivial or quarterly-fundamental signal evaluated to uniform zero position variance across stocks, generating 0 trades."}<br>
+          <strong>Actionable Remedy:</strong> Use composite predictive signals with temporal deviations (e.g. <code>ts_delta</code>, <code>ts_decay_linear</code>) and cross-sectional rankings before neutralizations.
+        `;
+      } else if (data.simulation_status === "ERROR") {
+        msgCard.style.borderLeft = "3px solid var(--error)";
+        explanation = `
+          <strong>Diagnostic Trace:</strong> Simulation failed during execution.<br>
+          <strong>Error Message:</strong> <code>${data.failure_reason || diag.error_message || diag.message || "Simulation error"}</code>
+        `;
+      } else {
+        msgCard.style.borderLeft = "3px solid var(--success)";
+        const m = data.metrics || {};
+        explanation = `
+          <strong>Diagnostic Trace:</strong> Simulation completed with valid empirical metrics (Evaluation: <code>EVALUATED</code>).<br>
+          <strong>Sharpe:</strong> ${m.sharpe !== null && m.sharpe !== undefined ? Number(m.sharpe).toFixed(4) : "N/A"} | 
+          <strong>Fitness:</strong> ${m.fitness !== null && m.fitness !== undefined ? Number(m.fitness).toFixed(4) : "N/A"} | 
+          <strong>Turnover:</strong> ${m.turnover !== null && m.turnover !== undefined ? (Number(m.turnover) * 100).toFixed(2) + "%" : "N/A"} | 
+          <strong>Margin:</strong> ${m.margin !== null && m.margin !== undefined ? Number(m.margin).toFixed(2) + " bps" : "N/A"}
+        `;
+      }
+      msgCard.innerHTML = explanation;
+
+      const modal = document.getElementById("simDiagnosticsModal");
+      if (modal) modal.style.display = "flex";
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      alert("Failed to load simulation diagnostics: " + err.message);
+    }
+  };
+
+  const closeDiagModal = document.getElementById("closeSimDiagnosticsModal");
+  const closeDiagBtn = document.getElementById("btnCloseSimDiagnosticsBtn");
+  const diagModalEl = document.getElementById("simDiagnosticsModal");
+  if (closeDiagModal && diagModalEl) {
+    closeDiagModal.addEventListener("click", () => diagModalEl.style.display = "none");
+  }
+  if (closeDiagBtn && diagModalEl) {
+    closeDiagBtn.addEventListener("click", () => diagModalEl.style.display = "none");
   }
 });
+
+

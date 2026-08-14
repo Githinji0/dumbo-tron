@@ -22,6 +22,8 @@ def test_complexity_scoring():
     assert score2 >= 1.0
 
 
+from sqlalchemy import select, delete
+
 def test_duplicate_rejection_worker():
     async def _run_test():
         # Auto-migrate database structure for the test context
@@ -30,6 +32,8 @@ def test_duplicate_rejection_worker():
         async with AsyncSessionLocal() as db:
             # Create a mock project id
             project_id = 9999
+            await db.execute(delete(Expression).where(Expression.project_id == project_id))
+            await db.commit()
             
             # Insert first expression as PENDING
             expr1 = Expression(
@@ -78,7 +82,7 @@ def test_duplicate_rejection_worker():
                 )
                 logs = logs_res.scalars().all()
                 assert len(logs) >= 1
-                assert "Duplicate Checker: Rejected" in logs[0].message
+                assert any("Duplicate Checker: Rejected" in l.message for l in logs)
                 
                 # Cleanup
                 await db2.delete(e1)

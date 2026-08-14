@@ -72,7 +72,23 @@ async def init_db():
                 ("operator_count", "INTEGER DEFAULT 0"),
                 ("field_count", "INTEGER DEFAULT 0"),
                 ("transformation_parent", "INTEGER"),
-                ("transformation_type", "VARCHAR(50)")
+                ("transformation_type", "VARCHAR(50)"),
+                ("ai_generated", "BOOLEAN DEFAULT 0"),
+                ("ai_analyzed", "BOOLEAN DEFAULT 0"),
+                ("ai_analysis_type", "VARCHAR(50)"),
+                ("ai_recommendation", "TEXT"),
+                ("ai_confidence", "FLOAT"),
+                ("ai_research_reason", "TEXT"),
+                ("signal_type", "VARCHAR(50) DEFAULT 'RAW_SIGNAL'"),
+                ("generation_reason", "TEXT"),
+                ("diagnostic_category", "VARCHAR(50)"),
+                ("research_quality_score", "FLOAT DEFAULT 0.0"),
+                ("evaluation_status", "VARCHAR(50) DEFAULT 'PENDING'"),
+                ("portfolio_status", "VARCHAR(50)"),
+                ("metrics_status", "VARCHAR(50)"),
+                ("raw_response_structure", "JSON"),
+                ("parser_status", "VARCHAR(50)"),
+                ("failure_reason", "TEXT")
             ]
             
             for col_name, col_type in expr_additions:
@@ -81,12 +97,29 @@ async def init_db():
                         cursor.execute(f"ALTER TABLE expressions ADD COLUMN {col_name} {col_type}")
                     except Exception:
                         pass
+
+            # Simulations table cols
+            cursor.execute("PRAGMA table_info(simulations)")
+            sim_cols = {row[1] for row in cursor.fetchall()}
+            
+            sim_additions = [
+                ("diagnostic_details", "JSON"),
+                ("remote_status", "VARCHAR(50)"),
+                ("raw_response_structure", "JSON")
+            ]
+            for col_name, col_type in sim_additions:
+                if col_name not in sim_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE simulations ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
                         
             # Metrics table cols
             cursor.execute("PRAGMA table_info(metrics)")
             metrics_cols = {row[1] for row in cursor.fetchall()}
             
             metric_additions = [
+                ("has_valid_metrics", "BOOLEAN DEFAULT 1"),
                 ("rank_ic", "FLOAT DEFAULT 0.0"),
                 ("mean_ic", "FLOAT DEFAULT 0.0"),
                 ("median_ic", "FLOAT DEFAULT 0.0"),
@@ -112,7 +145,9 @@ async def init_db():
                 ("lineage_experiment_count", "INTEGER DEFAULT 1"),
                 ("pareto_optimal", "BOOLEAN DEFAULT 0"),
                 ("candidate_tier", "INTEGER DEFAULT 0"),
-                ("multiple_testing_adjusted_score", "FLOAT DEFAULT 0.0")
+                ("multiple_testing_adjusted_score", "FLOAT DEFAULT 0.0"),
+                ("ai_critic_risk_level", "VARCHAR(50)"),
+                ("ai_critic_review", "JSON")
             ]
             
             for col_name, col_type in metric_additions:

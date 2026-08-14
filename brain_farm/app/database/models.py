@@ -93,6 +93,28 @@ class Expression(Base):
     transformation_parent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     transformation_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
+    # AI Research Metadata additions
+    ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_analyzed: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_analysis_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    ai_recommendation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    ai_research_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Signal Quality & Diagnostic Additions
+    signal_type: Mapped[Optional[str]] = mapped_column(String(50), default="RAW_SIGNAL")  # RAW_SIGNAL, TRANSFORMED_SIGNAL, PREDICTIVE_SIGNAL
+    generation_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    diagnostic_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # SIMULATION_ERROR, NO_VALID_METRICS, WEAK_ALPHA, NEAR_MISS, HIGH_QUALITY, HIGH_SHARPE_HIGH_TURNOVER, ROBUST_CANDIDATE, DUPLICATE, INVALID_EXPRESSION
+    research_quality_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+
+    # Post-Simulation Decoupled State & Diagnostic Fields
+    evaluation_status: Mapped[Optional[str]] = mapped_column(String(50), default="PENDING")  # PENDING, EVALUATED, TECHNICAL_FAILURE
+    portfolio_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # PORTFOLIO_AVAILABLE, PORTFOLIO_EMPTY, NOT_APPLICABLE
+    metrics_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # METRICS_AVAILABLE, METRICS_MISSING, METRICS_PARSE_ERROR, NOT_APPLICABLE
+    raw_response_structure: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    parser_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     project: Mapped["Project"] = relationship("Project", back_populates="expressions")
     simulations: Mapped[List["Simulation"]] = relationship("Simulation", back_populates="expression", cascade="all, delete-orphan")
 
@@ -104,8 +126,11 @@ class Simulation(Base):
     expression_id: Mapped[int] = mapped_column(Integer, ForeignKey("expressions.id"))
     brain_simulation_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True, index=True, nullable=True)
     brain_alpha_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), default="QUEUED")  # QUEUED, SENT, POLLING, COMPLETE, ERROR
+    status: Mapped[str] = mapped_column(String(50), default="QUEUED")  # QUEUED, SENT, POLLING, COMPLETE, ERROR, NO_VALID_METRICS
+    remote_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # COMPLETE, RUNNING, ERROR, FAILED
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    diagnostic_details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    raw_response_structure: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -120,13 +145,14 @@ class Metric(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     simulation_id: Mapped[int] = mapped_column(Integer, ForeignKey("simulations.id"), unique=True)
     
-    # In-Sample (IS) Metrics
-    sharpe: Mapped[float] = mapped_column(Float, default=0.0)
-    fitness: Mapped[float] = mapped_column(Float, default=0.0)
-    turnover: Mapped[float] = mapped_column(Float, default=0.0)
-    returns: Mapped[float] = mapped_column(Float, default=0.0)
-    margin: Mapped[float] = mapped_column(Float, default=0.0)
+    # In-Sample (IS) Metrics (Nullable to avoid masking missing stats as 0.0)
+    sharpe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fitness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    turnover: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    returns: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    margin: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     drawdown: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    has_valid_metrics: Mapped[bool] = mapped_column(Boolean, default=True)
     
     # Bookkeeping details
     sub_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -166,6 +192,10 @@ class Metric(Base):
     candidate_tier: Mapped[int] = mapped_column(Integer, default=0)
     multiple_testing_adjusted_score: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
     
+    # AI Critic Review additions
+    ai_critic_risk_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    ai_critic_review: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     simulation: Mapped["Simulation"] = relationship("Simulation", back_populates="metrics")
@@ -196,3 +226,57 @@ class DataFieldCache(Base):
     type: Mapped[str] = mapped_column(String(50), default="UNKNOWN")  # e.g., INTEGER, FLOAT
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AISetting(Base):
+    __tablename__ = "ai_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(String(50), default="gemini")
+    model: Mapped[str] = mapped_column(String(100), default="gemini-1.5-flash")
+    encrypted_api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    validation_status: Mapped[str] = mapped_column(String(50), default="AI_NOT_CONFIGURED")
+    last_validated: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    features_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    daily_calls: Mapped[int] = mapped_column(Integer, default=0)
+    monthly_calls: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AIUsageLog(Base):
+    __tablename__ = "ai_usage_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    feature: Mapped[str] = mapped_column(String(50))
+    provider: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(100))
+    latency: Mapped[float] = mapped_column(Float, default=0.0)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    error_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ResearchMemoryEntry(Base):
+    __tablename__ = "research_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
+    family: Mapped[str] = mapped_column(String(100), index=True)
+    transformation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    operator: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    field_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    applications_count: Mapped[int] = mapped_column(Integer, default=0)
+    fitness_improved_count: Mapped[int] = mapped_column(Integer, default=0)
+    turnover_reduced_count: Mapped[int] = mapped_column(Integer, default=0)
+    sharpe_preserved_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_stability: Mapped[float] = mapped_column(Float, default=0.0)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
