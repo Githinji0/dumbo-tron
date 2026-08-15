@@ -167,6 +167,23 @@ async def init_db():
                         cursor.execute(f"ALTER TABLE metrics ADD COLUMN {col_name} {col_type}")
                     except Exception:
                         pass
+
+            # Performance PRAGMAs & High-Throughput Indexes
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA cache_size=10000")
+                cursor.execute("PRAGMA busy_timeout=10000")
+                
+                # Indexes for rapid filtering during concurrent simulation loads
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_expressions_project_status ON expressions(project_id, status)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_simulations_status ON simulations(status)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_simulations_expr_status ON simulations(expression_id, status)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_simulations_updated ON simulations(updated_at DESC)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_project_logs_proj_created ON project_logs(project_id, created_at DESC)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_metrics_sim ON metrics(simulation_id)")
+            except Exception:
+                pass
                         
         await conn.run_sync(migrate_sqlite)
     await engine.dispose()

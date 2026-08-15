@@ -38,6 +38,7 @@ class WeightedCompositeScorer:
             .where(Expression.project_id == project_id)
             .where(Expression.status == "PASSED")
             .where(Expression.expression_text != expr_text)
+            .limit(30)
         )
         res = await db.execute(stmt)
         other_exprs = res.scalars().all()
@@ -45,12 +46,16 @@ class WeightedCompositeScorer:
         if not other_exprs:
             return 1.0
 
-        corrs = []
-        for other in other_exprs:
-            c = CorrelationFilter.calculate_correlation(expr_text, other)
-            corrs.append(abs(c))
+        def _calc_corrs(target: str, pool: list) -> float:
+            corrs = []
+            for other in pool:
+                c = CorrelationFilter.calculate_correlation(target, other)
+                corrs.append(abs(c))
+            return float(np.mean(corrs)) if corrs else 0.0
 
-        mean_corr = float(np.mean(corrs)) if corrs else 0.0
+        import asyncio
+        loop = asyncio.get_running_loop()
+        mean_corr = await loop.run_in_executor(None, _calc_corrs, expr_text, list(other_exprs))
         return max(0.0, min(1.0, 1.0 - mean_corr))
 
     @staticmethod

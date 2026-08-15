@@ -957,9 +957,10 @@ async def get_queue_stats(project_id: int):
     async with AsyncSessionLocal() as db:
         # Pending countdown
         res_pending = await db.execute(
-            select(Expression).where(Expression.project_id == project_id, Expression.status == "PENDING")
+            select(func.count()).select_from(Expression)
+            .where(Expression.project_id == project_id, Expression.status == "PENDING")
         )
-        pending_cnt = len(res_pending.scalars().all())
+        pending_cnt = res_pending.scalar() or 0
         
         # Count truly in-flight simulations from the Simulation table (QUEUED or POLLING).
         # Using Expression.status == "SIMULATING" is unreliable — it can get stuck

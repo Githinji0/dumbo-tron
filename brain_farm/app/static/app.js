@@ -902,23 +902,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  let _lastQueueHash = "";
+
   async function loadQueueData() {
     if (!activeProjectId) return;
     try {
       const res = await fetch(`/api/queue?project_id=${activeProjectId}`);
       const data = await res.json();
 
-      document.getElementById("statQueuePending").innerText = data.pending_count;
-      document.getElementById("statQueueRunning").innerText = data.running_count;
+      const statPendingEl = document.getElementById("statQueuePending");
+      const statRunningEl = document.getElementById("statQueueRunning");
+      if (statPendingEl) statPendingEl.innerText = data.pending_count;
+      if (statRunningEl) statRunningEl.innerText = data.running_count;
 
       const runningIconWrapper = document.getElementById("statQueueRunningIconWrapper");
       if (runningIconWrapper) {
-        if (data.running_count > 0) {
-          runningIconWrapper.innerHTML = '<i data-lucide="loader-2" class="spin" style="color:var(--success);"></i>';
-        } else {
-          runningIconWrapper.innerHTML = '<i data-lucide="activity" style="color:var(--text-secondary);"></i>';
+        const isRunning = data.running_count > 0;
+        const wasRunning = lastRunningCount > 0;
+        if (isRunning !== wasRunning || !runningIconWrapper.hasChildNodes()) {
+          if (isRunning) {
+            runningIconWrapper.innerHTML = '<i data-lucide="loader-2" class="spin" style="color:var(--success);"></i>';
+          } else {
+            runningIconWrapper.innerHTML = '<i data-lucide="activity" style="color:var(--text-secondary);"></i>';
+          }
+          if (window.lucide) window.lucide.createIcons();
         }
-        if (window.lucide) window.lucide.createIcons();
       }
 
       // When running count drops to 0 (simulations just finished), refresh analytics
@@ -927,15 +935,23 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       lastRunningCount = data.running_count;
 
-      const tbody = document.querySelector("#queueSimulationsTable tbody");
-      tbody.innerHTML = "";
-
       const list = data.simulations || [];
+      // Fast diffing to skip DOM reconstruction if nothing changed
+      const newHash = `${data.pending_count}:${data.running_count}:${list.map(s => `${s.db_id}-${s.status}-${s.last_checked}`).join('|')}`;
+      if (newHash === _lastQueueHash) {
+        return;
+      }
+      _lastQueueHash = newHash;
+
+      const tbody = document.querySelector("#queueSimulationsTable tbody");
+      if (!tbody) return;
+
       if (list.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center">No simulation tasks in queue history...</td></tr>';
         return;
       }
 
+      const fragment = document.createDocumentFragment();
       list.forEach(s => {
         const tr = document.createElement("tr");
 
@@ -972,8 +988,10 @@ document.addEventListener("DOMContentLoaded", () => {
         tr.appendChild(statusTd);
         tr.appendChild(checkTd);
         tr.appendChild(detailTd);
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
       });
+
+      tbody.replaceChildren(fragment);
     } catch (err) {
       console.error("Queue load failed:", err);
     }
@@ -1454,7 +1472,8 @@ document.addEventListener("DOMContentLoaded", () => {
         height: '100%',
         background: 'transparent',
         foreColor: 'var(--text-secondary)',
-        toolbar: { show: true }
+        toolbar: { show: true },
+        animations: { enabled: false }
       },
       colors: ['#ff007f', '#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
       series: series,
@@ -1470,9 +1489,15 @@ document.addEventListener("DOMContentLoaded", () => {
       grid: { borderColor: 'var(--border-color)' }
     };
 
-    if (scatterChart) scatterChart.destroy();
-    scatterChart = new ApexCharts(document.getElementById("scatterChartWrapper"), options);
-    scatterChart.render();
+    if (scatterChart) {
+      scatterChart.updateSeries(series, true);
+    } else {
+      const el = document.getElementById("scatterChartWrapper");
+      if (el) {
+        scatterChart = new ApexCharts(el, options);
+        scatterChart.render();
+      }
+    }
   }
 
   function renderFitnessTurnoverChart(items) {
@@ -1504,7 +1529,8 @@ document.addEventListener("DOMContentLoaded", () => {
         height: '100%',
         background: 'transparent',
         foreColor: 'var(--text-secondary)',
-        toolbar: { show: true }
+        toolbar: { show: true },
+        animations: { enabled: false }
       },
       colors: ['#ff007f', '#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
       series: series,
@@ -1520,9 +1546,15 @@ document.addEventListener("DOMContentLoaded", () => {
       grid: { borderColor: 'var(--border-color)' }
     };
 
-    if (fitnessTurnoverChart) fitnessTurnoverChart.destroy();
-    fitnessTurnoverChart = new ApexCharts(document.getElementById("fitnessTurnoverChartWrapper"), options);
-    fitnessTurnoverChart.render();
+    if (fitnessTurnoverChart) {
+      fitnessTurnoverChart.updateSeries(series, true);
+    } else {
+      const el = document.getElementById("fitnessTurnoverChartWrapper");
+      if (el) {
+        fitnessTurnoverChart = new ApexCharts(el, options);
+        fitnessTurnoverChart.render();
+      }
+    }
   }
 
   function renderSharpeFitnessChart(items) {
@@ -1554,7 +1586,8 @@ document.addEventListener("DOMContentLoaded", () => {
         height: '100%',
         background: 'transparent',
         foreColor: 'var(--text-secondary)',
-        toolbar: { show: true }
+        toolbar: { show: true },
+        animations: { enabled: false }
       },
       colors: ['#ff007f', '#00e676', '#40c4ff', '#ffd740', '#ff5252', '#a855f7'],
       series: series,
@@ -1569,9 +1602,15 @@ document.addEventListener("DOMContentLoaded", () => {
       grid: { borderColor: 'var(--border-color)' }
     };
 
-    if (sharpeFitnessChart) sharpeFitnessChart.destroy();
-    sharpeFitnessChart = new ApexCharts(document.getElementById("sharpeFitnessChartWrapper"), options);
-    sharpeFitnessChart.render();
+    if (sharpeFitnessChart) {
+      sharpeFitnessChart.updateSeries(series, true);
+    } else {
+      const el = document.getElementById("sharpeFitnessChartWrapper");
+      if (el) {
+        sharpeFitnessChart = new ApexCharts(el, options);
+        sharpeFitnessChart.render();
+      }
+    }
   }
 
   function renderAnalyticsAveragesTable(items) {

@@ -541,16 +541,46 @@ class SimulationWorker:
             margin = extracted["margin"]
             drawdown = extracted["drawdown"]
                 
-            # Compute advanced Phase 3 metrics
-            from brain_farm.app.services.ic_calculator import ICCalculator
-            from brain_farm.app.services.walk_forward import WalkForwardTester
-            from brain_farm.app.services.regime_analyzer import RegimeAnalyzer
+            # Compute advanced Phase 3 metrics in thread pool to prevent event loop blocking
+            def _compute_offline_metrics(expr_text: str, sharpe_val: float):
+                from brain_farm.app.services.ic_calculator import ICCalculator
+                from brain_farm.app.services.walk_forward import WalkForwardTester
+                from brain_farm.app.services.regime_analyzer import RegimeAnalyzer
+                from brain_farm.app.services.sensitivity import ParameterSensitivityTester
+                from brain_farm.app.services.correlation_filter import CorrelationFilter
+                import numpy as np
+                
+                ic_res = ICCalculator.calculate_ic_metrics(expr_text, sharpe_val)
+                wf_res = WalkForwardTester.evaluate_walk_forward(expr_text, sharpe_val)
+                reg_res = RegimeAnalyzer.evaluate_regimes(expr_text, sharpe_val)
+                
+                perturbed = ParameterSensitivityTester.generate_perturbed_expressions(expr_text)
+                p_corrs = []
+                for p_expr in perturbed:
+                    p_corr = CorrelationFilter.calculate_correlation(expr_text, p_expr)
+                    p_corrs.append({"expression": p_expr, "correlation": float(p_corr)})
+                
+                stab_score = float(np.mean([abs(c["correlation"]) for c in p_corrs])) if p_corrs else 1.0
+                sens_penalty = float(ParameterSensitivityTester.evaluate_sensitivity_penalty(expr_text, sharpe_val))
+                
+                return {
+                    "ic_m": ic_res,
+                    "wf_m": wf_res,
+                    "reg_m": reg_res,
+                    "stability_score": stab_score,
+                    "sens_penalty": sens_penalty,
+                    "p_corrs": p_corrs
+                }
+
+            loop = asyncio.get_running_loop()
+            offline = await loop.run_in_executor(None, _compute_offline_metrics, expr.expression_text, sharpe)
+            
+            ic_m = offline["ic_m"]
+            wf_m = offline["wf_m"]
+            reg_m = offline["reg_m"]
+            stability_score = offline["stability_score"]
+            
             from brain_farm.app.services.composite_scorer import WeightedCompositeScorer
-            
-            ic_m = ICCalculator.calculate_ic_metrics(expr.expression_text, sharpe)
-            wf_m = WalkForwardTester.evaluate_walk_forward(expr.expression_text, sharpe)
-            reg_m = RegimeAnalyzer.evaluate_regimes(expr.expression_text, sharpe)
-            
             comp_res = await WeightedCompositeScorer.compute_composite_score(
                 expr_text=expr.expression_text,
                 project_id=proj.id,
@@ -562,21 +592,9 @@ class SimulationWorker:
                 db=db
             )
 
-            # Compute and populate parameter sensitivity and regime Performance JSON values
-            from brain_farm.app.services.sensitivity import ParameterSensitivityTester
-            from brain_farm.app.services.correlation_filter import CorrelationFilter
-            import numpy as np
-            perturbed = ParameterSensitivityTester.generate_perturbed_expressions(expr.expression_text)
-            p_corrs = []
-            for p_expr in perturbed:
-                p_corr = CorrelationFilter.calculate_correlation(expr.expression_text, p_expr)
-                p_corrs.append({"expression": p_expr, "correlation": float(p_corr)})
-            
-            stability_score = float(np.mean([abs(c["correlation"]) for c in p_corrs])) if p_corrs else 1.0
-            
             expr.parameter_sensitivity = {
-                "penalty": float(ParameterSensitivityTester.evaluate_sensitivity_penalty(expr.expression_text, sharpe)),
-                "correlations": p_corrs
+                "penalty": offline["sens_penalty"],
+                "correlations": offline["p_corrs"]
             }
             
             expr.regime_performance = {
