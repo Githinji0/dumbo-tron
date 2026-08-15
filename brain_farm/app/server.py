@@ -293,8 +293,13 @@ async def finalize_user_login(email: str, password: str, use_mock: bool, client:
 
 @app.post("/api/auth/logout")
 async def auth_logout(request: Request, response: Response):
-    user_id = await get_current_user_id(request)
-    
+    try:
+        user_id = await get_current_user_id(request)
+    except HTTPException:
+        # Session already gone — just clear the cookie and return
+        response.delete_cookie(key="session_user_id")
+        return {"success": True}
+
     # Cancel all active user simulations
     async with AsyncSessionLocal() as db:
         stmt = (

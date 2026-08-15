@@ -458,20 +458,36 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function handleLogout() {
+    // Stop all background polling first
+    stopQueuePolling();
+    stopAnalyticsPolling();
+    stopLogsTabPolling();
+
+    // Best-effort server-side logout (ignore errors if session already gone)
     try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        headers: getHeaders()
-      });
-      currentUser = { authenticated: false, username: "", is_mock: true, user_id: null };
-      activeProjectId = null;
-      document.getElementById("activeProjectSelect").innerHTML = "";
-      updateAuthUI();
-      logAuthActivity("Session", "Destroyed active token profiles manually.", "WARNING");
-      switchView("auth-setup");
-    } catch (err) {
-      console.error(err);
-    }
+      await fetch("/api/auth/logout", { method: "POST", headers: getHeaders() });
+    } catch (_) {}
+
+    // Reset client state
+    currentUser = { authenticated: false, username: "", is_mock: true, user_id: null };
+    activeProjectId = null;
+    _lastQueueHash = "";
+    _lastLogsHash = "";
+
+    // Clear all data tables and lists so old data doesn't linger
+    const queueTbody = document.querySelector("#queueSimulationsTable tbody");
+    if (queueTbody) queueTbody.innerHTML = '<tr><td colspan="5" class="text-center">No active session — please log in.</td></tr>';
+
+    const passedTbody = document.querySelector("#passedAlphasTable tbody");
+    if (passedTbody) passedTbody.innerHTML = '<tr><td colspan="6" class="text-center">No active session — please log in.</td></tr>';
+
+    const logsList = document.getElementById("logsFeedList");
+    if (logsList) logsList.innerHTML = '<p class="placeholder-text" style="padding: 20px; text-align: center;">No active session — please log in.</p>';
+
+    document.getElementById("activeProjectSelect").innerHTML = "";
+    updateAuthUI();
+    logAuthActivity("Session", "Destroyed active token profiles manually.", "WARNING");
+    switchView("auth-setup");
   }
 
   // Create Project Context
