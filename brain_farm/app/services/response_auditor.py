@@ -71,11 +71,11 @@ class ResponseStructureAuditor:
 
         # Determine remote status
         raw_status = response_data.get("status")
-        if not raw_status and "is" in response_data and response_data["is"]:
+        if (not raw_status or str(raw_status).upper() in ("UNSUBMITTED", "SUBMITTED")) and "is" in response_data and response_data["is"]:
             raw_status = "COMPLETE"
         remote_status = str(raw_status or "UNKNOWN").upper().strip()
 
-        TERMINAL_SUCCESS = {"COMPLETE", "COMPLETED", "OK", "DONE", "WARNING", "SUCCESS", "FINISHED"}
+        TERMINAL_SUCCESS = {"COMPLETE", "COMPLETED", "OK", "DONE", "WARNING", "SUCCESS", "FINISHED", "UNSUBMITTED", "SUBMITTED"}
         TERMINAL_FAILURE = {"ERROR", "FAILED", "CANCELLED", "CANCELED", "FAIL"}
 
         if remote_status in TERMINAL_FAILURE:

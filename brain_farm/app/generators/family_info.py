@@ -29,7 +29,7 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "VALUE": {
         "description": "Undervalued securities (low price relative to fundamentals/book/earnings) outperform.",
-        "allowed_fields": ["close", "book_value", "ebit", "sales", "revenue", "eps_estimate", "fcf"],
+        "allowed_fields": ["close", "book_value", "ebit", "sales", "revenue", "eps", "fcf"],
         "preferred_operators": ["rank", "group_neutralize", "log"],
         "incompatible_operators": ["ts_delta", "ts_zscore"],
         "neutralization": "SUBINDUSTRY",
@@ -42,7 +42,7 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "QUALITY": {
         "description": "High quality companies (high profitability, low leverage, strong margins) outperform.",
-        "allowed_fields": ["net_income", "total_assets", "assets", "debt", "ebit", "sales", "revenue", "fcf"],
+        "allowed_fields": ["net_income", "assets", "debt", "ebit", "sales", "revenue", "fcf"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": ["ts_delta"],
         "neutralization": "SUBINDUSTRY",
@@ -55,7 +55,7 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "INVESTMENT": {
         "description": "Cross-sectional differences in capital expenditure and asset growth contain predictive information.",
-        "allowed_fields": ["capex", "revenue", "total_assets", "assets", "sales", "close"],
+        "allowed_fields": ["capex", "revenue", "assets", "sales", "close"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": ["ts_mean"],
         "neutralization": "SUBINDUSTRY",
@@ -67,7 +67,7 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "LEVERAGE": {
         "description": "Conservative capital structures (low debt-to-equity and high interest coverage) outperform.",
-        "allowed_fields": ["debt", "total_assets", "assets", "book_value", "ebit", "close"],
+        "allowed_fields": ["debt", "assets", "book_value", "ebit", "close"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": ["ts_mean"],
         "neutralization": "SUBINDUSTRY",
@@ -79,26 +79,26 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "EARNINGS": {
         "description": "Higher fundamental earnings and earnings yield lead to positive excess returns.",
-        "allowed_fields": ["ebit", "net_income", "eps_estimate", "close"],
+        "allowed_fields": ["ebit", "net_income", "eps", "eps_estimate", "close"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": [],
         "neutralization": "SUBINDUSTRY",
         "turnover_range": (0.05, 0.20),
         "templates": [
-            "group_neutralize(rank(ebit) / rank(close), subindustry)",
-            "rank(eps_estimate) / rank(close)"
+            "group_neutralize(rank({fundamental}) / rank(close), subindustry)",
+            "rank({fundamental}) / rank(close)"
         ]
     },
     "ANALYST_ESTIMATE": {
         "description": "Analyst sentiment, revision patterns, and forward expectations contain directional information.",
-        "allowed_fields": ["eps_estimate", "close", "volume"],
+        "allowed_fields": ["eps", "eps_estimate", "close", "volume"],
         "preferred_operators": ["ts_delta", "ts_mean", "rank", "group_neutralize"],
         "incompatible_operators": [],
         "neutralization": "INDUSTRY",
         "turnover_range": (0.05, 0.30),
         "templates": [
-            "group_neutralize(ts_delta(eps_estimate, {window}), industry)",
-            "ts_decay_linear(rank(ts_delta(eps_estimate, {window1})), {window2})"
+            "group_neutralize(ts_delta({field}, {window}), industry)",
+            "ts_decay_linear(rank(ts_delta({field}, {window1})), {window2})"
         ]
     },
     "VOLATILITY": {
@@ -140,38 +140,38 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "GROWTH": {
         "description": "Year-over-year or quarterly expansion of sales, income, and assets.",
-        "allowed_fields": ["revenue", "net_income", "sales", "total_assets"],
+        "allowed_fields": ["revenue", "net_income", "sales", "assets", "total_assets"],
         "preferred_operators": ["ts_delta", "rank", "group_neutralize"],
         "incompatible_operators": [],
         "neutralization": "SUBINDUSTRY",
         "turnover_range": (0.01, 0.15),
         "templates": [
-            "group_neutralize(rank(ts_delta(revenue, 20)), subindustry)",
-            "rank(ts_delta(net_income, 60)) / rank(total_assets)"
+            "group_neutralize(rank(ts_delta({fundamental}, 60)), subindustry)",
+            "rank(ts_delta({fundamental}, 60)) / rank({field})"
         ]
     },
     "CASH_FLOW": {
         "description": "Free cash flow indicators show real earnings quality.",
-        "allowed_fields": ["fcf", "close", "total_assets"],
+        "allowed_fields": ["fcf", "close", "assets", "total_assets"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": [],
         "neutralization": "SUBINDUSTRY",
         "turnover_range": (0.01, 0.12),
         "templates": [
-            "group_neutralize(rank(fcf) / rank(close), subindustry)",
-            "rank(fcf) / rank(total_assets)"
+            "group_neutralize(rank({fundamental}) / rank(close), subindustry)",
+            "rank({fundamental}) / rank({field})"
         ]
     },
     "BALANCE_SHEET": {
         "description": "Capital structure indicators, e.g. leverage ratios and cash cushions.",
-        "allowed_fields": ["debt", "total_assets", "cash"],
+        "allowed_fields": ["debt", "assets", "total_assets", "cash"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": [],
         "neutralization": "SUBINDUSTRY",
         "turnover_range": (0.01, 0.10),
         "templates": [
             "group_neutralize(rank(cash) - rank(debt), subindustry)",
-            "rank(debt) / rank(total_assets)"
+            "rank({fundamental}) / rank({field})"
         ]
     },
     "SENTIMENT": {
@@ -247,14 +247,14 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "ANALYST": {
         "description": "Analyst sentiment, revision patterns, and forward expectations contain directional information.",
-        "allowed_fields": ["eps_estimate", "close", "volume"],
+        "allowed_fields": ["eps", "eps_estimate", "close", "volume"],
         "preferred_operators": ["ts_delta", "ts_mean", "rank", "group_neutralize"],
         "incompatible_operators": [],
         "neutralization": "INDUSTRY",
         "turnover_range": (0.05, 0.30),
         "templates": [
-            "group_neutralize(ts_delta(eps_estimate, {window}), industry)",
-            "ts_decay_linear(rank(ts_delta(eps_estimate, {window1})), {window2})"
+            "group_neutralize(ts_delta({field}, {window}), industry)",
+            "ts_decay_linear(rank(ts_delta({field}, {window1})), {window2})"
         ]
     },
     "EVENT": {

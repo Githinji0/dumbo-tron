@@ -15,11 +15,14 @@ DEFAULT_FIELDS = [
     {"id": "vwap", "name": "Volume Weighted Average Price", "dataset": "PRICES", "category": "Technical", "type": "FLOAT"},
     {"id": "ebit", "name": "Earnings Before Interest and Taxes", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
     {"id": "capex", "name": "Capital Expenditures", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
-    {"id": "total_assets", "name": "Total Assets", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
+    {"id": "assets", "name": "Total Assets", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
     {"id": "revenue", "name": "Revenue", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
     {"id": "net_income", "name": "Net Income", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
-    {"id": "eps_estimate", "name": "EPS Estimate", "dataset": "ANALYST_ESTIMATES", "category": "Estimates", "type": "FLOAT"},
-    {"id": "sales", "name": "Total Sales", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"}
+    {"id": "eps", "name": "Earnings Per Share", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
+    {"id": "sales", "name": "Total Sales", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
+    {"id": "debt", "name": "Total Debt", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
+    {"id": "fcf", "name": "Free Cash Flow", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
+    {"id": "book_value", "name": "Book Value", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"}
 ]
 
 class FieldManager:

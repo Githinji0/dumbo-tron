@@ -314,10 +314,10 @@ class BrainClient:
                 {"id": "vwap", "name": "Volume Weighted Average Price", "dataset": "PRICES", "category": "Technical", "type": "FLOAT"},
                 {"id": "ebit", "name": "Earnings Before Interest and Taxes", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
                 {"id": "capex", "name": "Capital Expenditures", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
-                {"id": "total_assets", "name": "Total Assets", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
+                {"id": "assets", "name": "Total Assets", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
                 {"id": "revenue", "name": "Revenue", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
                 {"id": "net_income", "name": "Net Income", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
-                {"id": "eps_estimate", "name": "EPS Estimate", "dataset": "ANALYST_ESTIMATES", "category": "Estimates", "type": "FLOAT"},
+                {"id": "eps", "name": "Earnings Per Share", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
                 {"id": "sales", "name": "Total Sales", "dataset": "FUNDAMENTALS", "category": "Financials", "type": "FLOAT"},
                 {"id": "debt", "name": "Long-Term Debt", "dataset": "FUNDAMENTALS", "category": "Balance Sheet", "type": "FLOAT"},
                 {"id": "cash", "name": "Cash and Equivalents", "dataset": "FUNDAMENTALS", "category": "Balance Sheet", "type": "FLOAT"},
@@ -489,7 +489,8 @@ class BrainClient:
                     if alpha_res.status_code == 200:
                         alpha_data = alpha_res.json()
                         if isinstance(alpha_data, dict):
-                            alpha_data.setdefault("status", "COMPLETE")
+                            alpha_data["status"] = "COMPLETE"
+                            alpha_data["alpha"] = alpha_id
                             return alpha_data, None
                 return sim_data, None
             if res.status_code == 424:
