@@ -88,7 +88,18 @@ async def init_db():
                 ("metrics_status", "VARCHAR(50)"),
                 ("raw_response_structure", "JSON"),
                 ("parser_status", "VARCHAR(50)"),
-                ("failure_reason", "TEXT")
+                ("failure_reason", "TEXT"),
+                ("field_categories", "JSON"),
+                ("temporal_behavior", "VARCHAR(50)"),
+                ("compatibility_score", "FLOAT"),
+                ("constant_signal_risk", "VARCHAR(50)"),
+                ("preflight_status", "VARCHAR(50) DEFAULT 'PASSED'"),
+                ("preflight_reason", "TEXT"),
+                ("preflight_report", "JSON"),
+                ("expression_hash", "VARCHAR(64)"),
+                ("structure_hash", "VARCHAR(64)"),
+                ("parent_candidate_id", "INTEGER"),
+                ("research_hypothesis", "TEXT")
             ]
             
             for col_name, col_type in expr_additions:

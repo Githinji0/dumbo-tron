@@ -81,6 +81,12 @@ class FamilyGenerator(BaseGenerator):
             if has_forbidden:
                 continue
             if expr not in candidates:
+                # Preflight Gatekeeper
+                from brain_farm.app.services.signal_preflight import SignalPreflight, PreflightDecision
+                preflight_res = SignalPreflight.evaluate(expr, family=self.family_name)
+                if preflight_res["decision"] != PreflightDecision.PASS:
+                    continue
+
                 passed, _ = StatisticalPreScreen.pre_screen(expr, self.allowed_fields, family=self.family_name)
                 if passed:
                     candidates.append(expr)
@@ -103,6 +109,7 @@ class FamilyGenerator(BaseGenerator):
                     self.generated_metadata[expr] = {
                         "research_family": self.family_name,
                         "hypothesis": hypo_text,
+                        "research_hypothesis": hypo_text,
                         "expected_relationship": expected_relationship,
                         "expected_horizon": horizon,
                         "signal_type": quality_res["signal_type"],
@@ -120,7 +127,18 @@ class FamilyGenerator(BaseGenerator):
                         "expression_depth": analysis["expression_depth"],
                         "operator_count": analysis["operator_count"],
                         "field_count": analysis["field_count"],
-                        "complexity_score": analysis["complexity_score"]
+                        "complexity_score": analysis["complexity_score"],
+                        
+                        # Preflight and Temporal Semantics
+                        "field_categories": preflight_res["field_categories"],
+                        "temporal_behavior": ", ".join(preflight_res["temporal_behavior"]),
+                        "compatibility_score": preflight_res["compatibility_score"],
+                        "constant_signal_risk": preflight_res["constant_signal_risk"],
+                        "preflight_status": "PASSED",
+                        "preflight_reason": preflight_res["reason"],
+                        "preflight_report": preflight_res,
+                        "expression_hash": preflight_res.get("expression_hash"),
+                        "structure_hash": preflight_res.get("structure_hash")
                     }
                 
         return candidates[:count]

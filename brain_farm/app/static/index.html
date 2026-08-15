@@ -517,8 +517,50 @@
               <div class="table-container">
                 <table class="grid-table" id="analyticsCorrelationMatrixTable">
                   <thead></thead>
-                  <tbody></tbody>
-                </table>
+            <!-- Field & Operator Empirical Research Memory -->
+            <div style="margin-top: 25px; margin-bottom: 25px;">
+              <div class="card-header-flex">
+                <h3>Field & Operator Empirical Memory (Valid Portfolio Conversion)</h3>
+              </div>
+              <div class="grid-2col" style="margin-top: 12px;">
+                <div class="card">
+                  <h4 style="margin-top: 0; font-size: 13px; color: var(--primary-accent);">Dataset Fields Conversion & Quality</h4>
+                  <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+                    <table class="grid-table" id="analyticsFieldMemoryTable">
+                      <thead>
+                        <tr>
+                          <th>Field</th>
+                          <th>Speed</th>
+                          <th>Valid Rate</th>
+                          <th>Empty Rate</th>
+                          <th>Avg Sharpe</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr><td colspan="5" class="text-center">Collecting empirical research data...</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="card">
+                  <h4 style="margin-top: 0; font-size: 13px; color: var(--primary-accent);">Operators Empirical Performance</h4>
+                  <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+                    <table class="grid-table" id="analyticsOperatorMemoryTable">
+                      <thead>
+                        <tr>
+                          <th>Operator</th>
+                          <th>Type</th>
+                          <th>Valid Rate</th>
+                          <th>Avg Fitness</th>
+                          <th>Avg Sharpe</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr><td colspan="5" class="text-center">Collecting empirical research data...</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1201,6 +1243,22 @@
         <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color);">
           <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Evaluation</div>
           <div id="diagEvaluationStatus" style="font-size: 11px; font-weight: 700; color: #ffa000; margin-top: 4px;">TECHNICAL FAILURE</div>
+        </div>
+      </div>
+
+      <!-- Preflight Semantics & Constant-Signal Risk -->
+      <div id="diagPreflightSemanticsCard" style="background: var(--bg-primary); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 14px; font-size: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+        <div>
+          <span style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Constant Signal Risk</span>
+          <div id="diagConstantRiskBadge" style="font-weight: 700; color: var(--success); margin-top: 2px;">LOW</div>
+        </div>
+        <div>
+          <span style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Semantic Compatibility</span>
+          <div id="diagCompatScore" style="font-weight: 700; color: var(--primary-accent); margin-top: 2px;">1.00</div>
+        </div>
+        <div>
+          <span style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Temporal Behavior</span>
+          <div id="diagTemporalBehavior" style="font-weight: 700; color: var(--text-primary); margin-top: 2px;">FAST</div>
         </div>
       </div>
 

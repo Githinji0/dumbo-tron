@@ -135,6 +135,43 @@ class SimulationWorker:
                     logger.warning(f"Pre-Screen Filter: Rejected expression {expr.id} -> {screen_reason}")
                     continue
 
+                # 1b. Multi-Stage Signal Preflight Validation (Temporal, Constant-Signal, Compatibility)
+                from brain_farm.app.services.signal_preflight import SignalPreflight, PreflightDecision, ConstantSignalRisk
+                preflight_res = SignalPreflight.evaluate(expr.expression_text, family=expr.research_family)
+                
+                # Persist preflight metadata
+                expr.field_categories = preflight_res["field_categories"]
+                expr.temporal_behavior = ", ".join(preflight_res["temporal_behavior"])
+                expr.compatibility_score = preflight_res["compatibility_score"]
+                expr.constant_signal_risk = preflight_res["constant_signal_risk"]
+                expr.preflight_report = preflight_res
+                expr.expression_hash = preflight_res.get("expression_hash")
+                expr.structure_hash = preflight_res.get("structure_hash")
+                
+                if preflight_res["decision"] != PreflightDecision.PASS:
+                    expr.status = "PREFLIGHT_REJECTED"
+                    expr.preflight_status = "REJECTED"
+                    expr.preflight_reason = preflight_res["reason"]
+                    expr.diagnostic_category = "CONSTANT_SIGNAL_RISK" if preflight_res["constant_signal_risk"] == ConstantSignalRisk.HIGH else "PREFLIGHT_REJECTED"
+                    
+                    log = ProjectLog(
+                        project_id=expr.project_id,
+                        level="WARNING",
+                        message=(
+                            f"Signal Preflight Gatekeeper: Candidate Rejected Before Simulation!\n"
+                            f"Formula: '{expr.expression_text}'\n"
+                            f"Reason: {preflight_res['reason']}\n"
+                            f"Constant Signal Risk: {preflight_res['constant_signal_risk']} | Compatibility Score: {preflight_res['compatibility_score']:.2f}\n"
+                            f"Advice: Avoid short daily rolling windows on slow-moving quarterly fundamental data. Use fundamental ratios, cross-sectional ranking, or lookback >= 60d."
+                        )
+                    )
+                    db.add(log)
+                    logger.warning(f"Signal Preflight: Rejected expression {expr.id} -> {preflight_res['reason']}")
+                    continue
+                else:
+                    expr.preflight_status = "PASSED"
+                    expr.preflight_reason = preflight_res["reason"]
+
                 # 2. Fast local database checking against ALL expressions (not just PASSED)
                 dup_res = await db.execute(
                     select(Expression)
@@ -442,6 +479,32 @@ class SimulationWorker:
                     )
                 )
                 db.add(log)
+                
+                # Empirical Memory Recording for Empty Portfolio / Technical Failures
+                try:
+                    from brain_farm.app.services.structural_dedup import StructuralDedup
+                    from brain_farm.app.ai.research_memory import ResearchMemoryManager
+                    fields, operators, _ = StructuralDedup.extract_fields_and_operators(expr.expression_text)
+                    is_empty = audit["portfolio_status"] == "PORTFOLIO_EMPTY"
+                    for f in fields:
+                        await ResearchMemoryManager.record_field_outcome(
+                            db=db,
+                            field_name=f,
+                            is_valid_metrics=False,
+                            is_empty_portfolio=is_empty,
+                            project_id=proj.id
+                        )
+                    for op in operators:
+                        await ResearchMemoryManager.record_operator_outcome(
+                            db=db,
+                            operator_name=op,
+                            is_valid_metrics=False,
+                            is_empty_portfolio=is_empty,
+                            project_id=proj.id
+                        )
+                except Exception as e:
+                    logger.warning(f"Field/Operator failure memory recording skipped: {e}")
+
                 await db.commit()
                 return
 
@@ -655,7 +718,9 @@ class SimulationWorker:
             
             # Empirical Research Memory Recording
             try:
+                from brain_farm.app.services.structural_dedup import StructuralDedup
                 from brain_farm.app.ai.research_memory import ResearchMemoryManager
+                
                 await ResearchMemoryManager.record_simulation_outcome(
                     db=db,
                     family=expr.research_family,
@@ -667,6 +732,32 @@ class SimulationWorker:
                     passed=passed,
                     project_id=proj.id
                 )
+                
+                # Empirical Field & Operator Memory Recording
+                fields, operators, _ = StructuralDedup.extract_fields_and_operators(expr.expression_text)
+                for f in fields:
+                    await ResearchMemoryManager.record_field_outcome(
+                        db=db,
+                        field_name=f,
+                        sharpe=sharpe,
+                        fitness=fitness,
+                        turnover=turnover,
+                        margin=margin,
+                        is_valid_metrics=True,
+                        is_empty_portfolio=False,
+                        project_id=proj.id
+                    )
+                for op in operators:
+                    await ResearchMemoryManager.record_operator_outcome(
+                        db=db,
+                        operator_name=op,
+                        sharpe=sharpe,
+                        fitness=fitness,
+                        turnover=turnover,
+                        is_valid_metrics=True,
+                        is_empty_portfolio=False,
+                        project_id=proj.id
+                    )
             except Exception as e:
                 logger.warning(f"Research memory recording skipped: {e}")
             

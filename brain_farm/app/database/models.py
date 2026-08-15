@@ -115,6 +115,19 @@ class Expression(Base):
     parser_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Preflight, Temporal Semantics & Lineage Fields
+    field_categories: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    temporal_behavior: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    compatibility_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    constant_signal_risk: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # LOW, MEDIUM, HIGH
+    preflight_status: Mapped[Optional[str]] = mapped_column(String(50), default="PASSED")  # PASSED, REJECTED, REGENERATED
+    preflight_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    preflight_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    expression_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    structure_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    parent_candidate_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    research_hypothesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     project: Mapped["Project"] = relationship("Project", back_populates="expressions")
     simulations: Mapped[List["Simulation"]] = relationship("Simulation", back_populates="expression", cascade="all, delete-orphan")
 
@@ -279,4 +292,39 @@ class ResearchMemoryEntry(Base):
     avg_stability: Mapped[float] = mapped_column(Float, default=0.0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class FieldMemory(Base):
+    __tablename__ = "field_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(100), index=True)
+    category: Mapped[str] = mapped_column(String(50), default="UNKNOWN")
+    temporal_behavior: Mapped[str] = mapped_column(String(50), default="UNKNOWN")
+    total_simulations: Mapped[int] = mapped_column(Integer, default=0)
+    valid_simulations: Mapped[int] = mapped_column(Integer, default=0)
+    empty_portfolio_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_sharpe: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_fitness: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_turnover: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_margin: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OperatorMemory(Base):
+    __tablename__ = "operator_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
+    operator_name: Mapped[str] = mapped_column(String(100), index=True)
+    operator_type: Mapped[str] = mapped_column(String(50), default="TIME_SERIES")
+    total_simulations: Mapped[int] = mapped_column(Integer, default=0)
+    valid_simulations: Mapped[int] = mapped_column(Integer, default=0)
+    empty_portfolio_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_sharpe: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_fitness: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_turnover: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 

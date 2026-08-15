@@ -126,3 +126,171 @@ class ResearchMemoryManager:
             logger.error(f"Error compiling research memory summary: {e}")
 
         return summary
+
+    @staticmethod
+    async def record_field_outcome(
+        db: AsyncSession,
+        field_name: str,
+        sharpe: float = 0.0,
+        fitness: float = 0.0,
+        turnover: float = 0.0,
+        margin: float = 0.0,
+        is_valid_metrics: bool = True,
+        is_empty_portfolio: bool = False,
+        project_id: Optional[int] = None
+    ):
+        """Records empirical performance by dataset field."""
+        try:
+            from brain_farm.app.database.models import FieldMemory
+            from brain_farm.app.services.field_semantics import FieldSemantics
+            
+            stmt = select(FieldMemory).where(
+                FieldMemory.field_name == field_name,
+                FieldMemory.project_id == project_id
+            )
+            result = await db.execute(stmt)
+            entry = result.scalar_one_or_none()
+            
+            info = FieldSemantics.get_field_info(field_name)
+            
+            if not entry:
+                entry = FieldMemory(
+                    project_id=project_id,
+                    field_name=field_name,
+                    category=info.get("category", "UNKNOWN"),
+                    temporal_behavior=info.get("temporal_behavior", "UNKNOWN"),
+                    total_simulations=1,
+                    valid_simulations=1 if is_valid_metrics else 0,
+                    empty_portfolio_count=1 if is_empty_portfolio else 0,
+                    avg_sharpe=sharpe if is_valid_metrics else 0.0,
+                    avg_fitness=fitness if is_valid_metrics else 0.0,
+                    avg_turnover=turnover if is_valid_metrics else 0.0,
+                    avg_margin=margin if is_valid_metrics else 0.0
+                )
+                db.add(entry)
+            else:
+                entry.total_simulations += 1
+                if is_empty_portfolio:
+                    entry.empty_portfolio_count += 1
+                if is_valid_metrics:
+                    entry.valid_simulations += 1
+                    # Rolling moving average
+                    n = entry.valid_simulations
+                    entry.avg_sharpe = float((entry.avg_sharpe * (n - 1) + sharpe) / n)
+                    entry.avg_fitness = float((entry.avg_fitness * (n - 1) + fitness) / n)
+                    entry.avg_turnover = float((entry.avg_turnover * (n - 1) + turnover) / n)
+                    entry.avg_margin = float((entry.avg_margin * (n - 1) + margin) / n)
+                entry.updated_at = datetime.utcnow()
+                
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Error recording field outcome for {field_name}: {e}")
+
+    @staticmethod
+    async def record_operator_outcome(
+        db: AsyncSession,
+        operator_name: str,
+        sharpe: float = 0.0,
+        fitness: float = 0.0,
+        turnover: float = 0.0,
+        is_valid_metrics: bool = True,
+        is_empty_portfolio: bool = False,
+        project_id: Optional[int] = None
+    ):
+        """Records empirical performance by operator."""
+        try:
+            from brain_farm.app.database.models import OperatorMemory
+            from brain_farm.app.services.field_semantics import FieldSemantics
+            
+            stmt = select(OperatorMemory).where(
+                OperatorMemory.operator_name == operator_name,
+                OperatorMemory.project_id == project_id
+            )
+            result = await db.execute(stmt)
+            entry = result.scalar_one_or_none()
+            
+            info = FieldSemantics.get_operator_info(operator_name)
+            
+            if not entry:
+                entry = OperatorMemory(
+                    project_id=project_id,
+                    operator_name=operator_name,
+                    operator_type=info.get("type", "TIME_SERIES"),
+                    total_simulations=1,
+                    valid_simulations=1 if is_valid_metrics else 0,
+                    empty_portfolio_count=1 if is_empty_portfolio else 0,
+                    avg_sharpe=sharpe if is_valid_metrics else 0.0,
+                    avg_fitness=fitness if is_valid_metrics else 0.0,
+                    avg_turnover=turnover if is_valid_metrics else 0.0
+                )
+                db.add(entry)
+            else:
+                entry.total_simulations += 1
+                if is_empty_portfolio:
+                    entry.empty_portfolio_count += 1
+                if is_valid_metrics:
+                    entry.valid_simulations += 1
+                    n = entry.valid_simulations
+                    entry.avg_sharpe = float((entry.avg_sharpe * (n - 1) + sharpe) / n)
+                    entry.avg_fitness = float((entry.avg_fitness * (n - 1) + fitness) / n)
+                    entry.avg_turnover = float((entry.avg_turnover * (n - 1) + turnover) / n)
+                entry.updated_at = datetime.utcnow()
+                
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Error recording operator outcome for {operator_name}: {e}")
+
+    @staticmethod
+    async def get_field_statistics(db: AsyncSession, project_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Returns aggregated field performance metrics."""
+        try:
+            from brain_farm.app.database.models import FieldMemory
+            stmt = select(FieldMemory).where(FieldMemory.project_id == project_id if project_id else True).order_by(FieldMemory.total_simulations.desc())
+            result = await db.execute(stmt)
+            entries = result.scalars().all()
+            return [
+                {
+                    "field_name": e.field_name,
+                    "category": e.category,
+                    "temporal_behavior": e.temporal_behavior,
+                    "total_simulations": e.total_simulations,
+                    "valid_simulations": e.valid_simulations,
+                    "valid_rate": round(e.valid_simulations / max(1, e.total_simulations), 3),
+                    "empty_portfolio_rate": round(e.empty_portfolio_count / max(1, e.total_simulations), 3),
+                    "avg_sharpe": round(e.avg_sharpe, 3),
+                    "avg_fitness": round(e.avg_fitness, 3),
+                    "avg_turnover": round(e.avg_turnover, 3),
+                    "avg_margin": round(e.avg_margin, 2)
+                }
+                for e in entries
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching field statistics: {e}")
+            return []
+
+    @staticmethod
+    async def get_operator_statistics(db: AsyncSession, project_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Returns aggregated operator performance metrics."""
+        try:
+            from brain_farm.app.database.models import OperatorMemory
+            stmt = select(OperatorMemory).where(OperatorMemory.project_id == project_id if project_id else True).order_by(OperatorMemory.total_simulations.desc())
+            result = await db.execute(stmt)
+            entries = result.scalars().all()
+            return [
+                {
+                    "operator_name": e.operator_name,
+                    "operator_type": e.operator_type,
+                    "total_simulations": e.total_simulations,
+                    "valid_simulations": e.valid_simulations,
+                    "valid_rate": round(e.valid_simulations / max(1, e.total_simulations), 3),
+                    "empty_portfolio_rate": round(e.empty_portfolio_count / max(1, e.total_simulations), 3),
+                    "avg_sharpe": round(e.avg_sharpe, 3),
+                    "avg_fitness": round(e.avg_fitness, 3),
+                    "avg_turnover": round(e.avg_turnover, 3)
+                }
+                for e in entries
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching operator statistics: {e}")
+            return []
+

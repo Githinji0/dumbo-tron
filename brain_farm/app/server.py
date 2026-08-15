@@ -996,7 +996,12 @@ async def get_queue_stats(project_id: int):
                 Simulation.error_message,
                 Expression.signal_type,
                 Expression.diagnostic_category,
-                Simulation.diagnostic_details
+                Simulation.diagnostic_details,
+                Expression.constant_signal_risk,
+                Expression.compatibility_score,
+                Expression.temporal_behavior,
+                Expression.preflight_status,
+                Expression.research_hypothesis
             )
             .select_from(Simulation)
             .join(Expression, Simulation.expression_id == Expression.id)
@@ -1015,6 +1020,11 @@ async def get_queue_stats(project_id: int):
             sig_type = s[6] or "RAW_SIGNAL"
             diag_cat = s[7] or ("NO_VALID_METRICS" if status_val == "NO_VALID_METRICS" else ("SIMULATION_ERROR" if status_val == "ERROR" else "NORMAL"))
             diag_details = s[8] or {}
+            c_risk = s[9] or "LOW"
+            compat = s[10] if s[10] is not None else 1.0
+            temp_beh = s[11] or "FAST"
+            pref_status = s[12] or "PASSED"
+            hypothesis = s[13] or ""
             
             c_info = classify_error_string(raw_msg) if status_val == "ERROR" else {"category": diag_cat, "detail": raw_msg or "Normal"}
             sim_list.append({
@@ -1026,6 +1036,11 @@ async def get_queue_stats(project_id: int):
                 "signal_type": sig_type,
                 "diagnostic_category": diag_cat,
                 "diagnostic_details": diag_details,
+                "constant_signal_risk": c_risk,
+                "compatibility_score": compat,
+                "temporal_behavior": temp_beh,
+                "preflight_status": pref_status,
+                "research_hypothesis": hypothesis,
                 "category": c_info.get("category", diag_cat),
                 "message": c_info.get("detail", "Normal")
             })
@@ -1037,6 +1052,36 @@ async def get_queue_stats(project_id: int):
             "concurrency_limit": 5,
             "simulations": sim_list
         }
+
+
+@app.post("/api/preflight/validate")
+async def validate_preflight(payload: Dict[str, Any]):
+    """Validates an expression using the Preflight Engine and returns a detailed SignalQualityReport."""
+    expr_text = payload.get("expression", "").strip()
+    family = payload.get("family")
+    if not expr_text:
+        raise HTTPException(status_code=400, detail="Expression text is required")
+    from brain_farm.app.services.signal_preflight import SignalPreflight
+    report = SignalPreflight.evaluate(expr_text, family=family)
+    return report
+
+
+@app.get("/api/research/field-stats")
+async def get_field_research_stats(project_id: Optional[int] = None):
+    """Returns empirical field memory performance metrics."""
+    async with AsyncSessionLocal() as db:
+        from brain_farm.app.ai.research_memory import ResearchMemoryManager
+        stats = await ResearchMemoryManager.get_field_statistics(db, project_id=project_id)
+        return stats
+
+
+@app.get("/api/research/operator-stats")
+async def get_operator_research_stats(project_id: Optional[int] = None):
+    """Returns empirical operator memory performance metrics."""
+    async with AsyncSessionLocal() as db:
+        from brain_farm.app.ai.research_memory import ResearchMemoryManager
+        stats = await ResearchMemoryManager.get_operator_statistics(db, project_id=project_id)
+        return stats
 
 @app.get("/api/logs")
 async def get_logs(

@@ -1367,8 +1367,61 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Calculate mutual correlations if we have passed alphas
       loadAnalyticsMutualCorrelations();
+      loadFieldAndOperatorStats();
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  async function loadFieldAndOperatorStats() {
+    try {
+      const pId = activeProjectId ? `?project_id=${activeProjectId}` : "";
+      const [resF, resO] = await Promise.all([
+        fetch(`/api/research/field-stats${pId}`),
+        fetch(`/api/research/operator-stats${pId}`)
+      ]);
+
+      if (resF.ok) {
+        const fields = await resF.json();
+        const fTbody = document.querySelector("#analyticsFieldMemoryTable tbody");
+        if (fTbody) {
+          if (!fields || fields.length === 0) {
+            fTbody.innerHTML = '<tr><td colspan="5" class="text-center">No empirical field data yet...</td></tr>';
+          } else {
+            fTbody.innerHTML = fields.map(f => `
+              <tr>
+                <td><code>${f.field_name}</code></td>
+                <td><span class="badge" style="font-size: 10px;">${f.temporal_behavior}</span></td>
+                <td style="color: ${f.valid_rate >= 0.8 ? 'var(--success)' : '#ffa000'}; font-weight: 600;">${(f.valid_rate * 100).toFixed(0)}%</td>
+                <td style="color: ${f.empty_portfolio_rate > 0.15 ? 'var(--error)' : 'var(--text-secondary)'};">${(f.empty_portfolio_rate * 100).toFixed(0)}%</td>
+                <td>${Number(f.avg_sharpe).toFixed(2)}</td>
+              </tr>
+            `).join("");
+          }
+        }
+      }
+
+      if (resO.ok) {
+        const ops = await resO.json();
+        const oTbody = document.querySelector("#analyticsOperatorMemoryTable tbody");
+        if (oTbody) {
+          if (!ops || ops.length === 0) {
+            oTbody.innerHTML = '<tr><td colspan="5" class="text-center">No empirical operator data yet...</td></tr>';
+          } else {
+            oTbody.innerHTML = ops.map(o => `
+              <tr>
+                <td><code>${o.operator_name}</code></td>
+                <td><span class="badge" style="font-size: 10px;">${o.operator_type}</span></td>
+                <td style="color: ${o.valid_rate >= 0.8 ? 'var(--success)' : '#ffa000'}; font-weight: 600;">${(o.valid_rate * 100).toFixed(0)}%</td>
+                <td>${Number(o.avg_fitness).toFixed(2)}</td>
+                <td>${Number(o.avg_sharpe).toFixed(2)}</td>
+              </tr>
+            `).join("");
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed loading field/operator empirical stats:", e);
     }
   }
 
@@ -2598,6 +2651,22 @@ document.addEventListener("DOMContentLoaded", () => {
         evalStatusEl.innerText = evalStatus.replace("_", " ");
         evalStatusEl.style.color = evalStatus === "EVALUATED" ? "var(--success)" : "#ffa000";
       }
+
+      // Preflight Semantics & Constant Risk
+      const constantRiskBadge = document.getElementById("diagConstantRiskBadge");
+      const compatScoreEl = document.getElementById("diagCompatScore");
+      const tempBehEl = document.getElementById("diagTemporalBehavior");
+
+      const cRisk = data.constant_signal_risk || "LOW";
+      const compatScore = data.compatibility_score !== undefined && data.compatibility_score !== null ? Number(data.compatibility_score).toFixed(2) : "1.00";
+      const tempBeh = data.temporal_behavior || "FAST";
+
+      if (constantRiskBadge) {
+        constantRiskBadge.innerText = cRisk;
+        constantRiskBadge.style.color = cRisk === "LOW" ? "var(--success)" : (cRisk === "MEDIUM" ? "#ffa000" : "var(--error)");
+      }
+      if (compatScoreEl) compatScoreEl.innerText = compatScore;
+      if (tempBehEl) tempBehEl.innerText = tempBeh;
 
       const parserPathLabel = document.getElementById("diagParserPathLabel");
       if (parserPathLabel) {

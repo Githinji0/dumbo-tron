@@ -29,7 +29,7 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "VALUE": {
         "description": "Undervalued securities (low price relative to fundamentals/book/earnings) outperform.",
-        "allowed_fields": ["close", "book_value", "ebit", "sales", "revenue", "eps_estimate"],
+        "allowed_fields": ["close", "book_value", "ebit", "sales", "revenue", "eps_estimate", "fcf"],
         "preferred_operators": ["rank", "group_neutralize", "log"],
         "incompatible_operators": ["ts_delta", "ts_zscore"],
         "neutralization": "SUBINDUSTRY",
@@ -42,15 +42,39 @@ RESEARCH_FAMILIES: Dict[str, Dict[str, Any]] = {
     },
     "QUALITY": {
         "description": "High quality companies (high profitability, low leverage, strong margins) outperform.",
-        "allowed_fields": ["net_income", "total_assets", "debt", "ebit", "sales"],
+        "allowed_fields": ["net_income", "total_assets", "assets", "debt", "ebit", "sales", "revenue", "fcf"],
         "preferred_operators": ["rank", "group_neutralize"],
         "incompatible_operators": ["ts_delta"],
         "neutralization": "SUBINDUSTRY",
         "turnover_range": (0.01, 0.10),
         "templates": [
-            "group_neutralize(rank(net_income) / rank(total_assets), subindustry)",
-            "group_neutralize(rank(ebit) / rank(sales), industry)",
-            "rank(net_income) - rank(debt)"
+            "group_neutralize(rank({fundamental}) / rank({field}), subindustry)",
+            "group_neutralize(rank({fundamental}) - rank({field}), subindustry)",
+            "rank({fundamental}) / rank({field})"
+        ]
+    },
+    "INVESTMENT": {
+        "description": "Cross-sectional differences in capital expenditure and asset growth contain predictive information.",
+        "allowed_fields": ["capex", "revenue", "total_assets", "assets", "sales", "close"],
+        "preferred_operators": ["rank", "group_neutralize"],
+        "incompatible_operators": ["ts_mean"],
+        "neutralization": "SUBINDUSTRY",
+        "turnover_range": (0.01, 0.12),
+        "templates": [
+            "group_neutralize(-rank({fundamental}) / rank({field}), subindustry)",
+            "-rank({fundamental}) / rank({field})"
+        ]
+    },
+    "LEVERAGE": {
+        "description": "Conservative capital structures (low debt-to-equity and high interest coverage) outperform.",
+        "allowed_fields": ["debt", "total_assets", "assets", "book_value", "ebit", "close"],
+        "preferred_operators": ["rank", "group_neutralize"],
+        "incompatible_operators": ["ts_mean"],
+        "neutralization": "SUBINDUSTRY",
+        "turnover_range": (0.01, 0.10),
+        "templates": [
+            "group_neutralize(-rank({fundamental}) / rank({field}), subindustry)",
+            "-rank({fundamental}) / rank({field})"
         ]
     },
     "EARNINGS": {
