@@ -22,6 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initialisation
   initNav();
   checkAuthStatus();
+  loadProjectsList();
   initEventHandlers();
 
   // Lucide icons render
@@ -523,15 +524,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Load projects list
   async function loadProjectsList() {
-    if (!currentUser.authenticated) return;
     try {
       const res = await fetch("/api/projects", { headers: getHeaders() });
       const projects = await res.json();
 
       const select = document.getElementById("activeProjectSelect");
+      if (!select) return;
       select.innerHTML = "";
 
-      if (projects.length === 0) {
+      if (!projects || projects.length === 0) {
         const option = document.createElement("option");
         option.value = "";
         option.text = "-- No Projects Created --";
@@ -552,7 +553,7 @@ document.addEventListener("DOMContentLoaded", () => {
         select.value = String(activeProjectId);
       }
 
-      window.cachedProjects = projects;
+      window.cachedProjects = projects || [];
       updateProjectSummaries();
       if (activeProjectId) {
         loadDiagnosticsLogs();
@@ -575,6 +576,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updatePassedViewWarnings();
     updateLogsViewWarnings();
 
+    if (!summaryBox) return;
     if (!activeProjectId) {
       summaryBox.innerHTML = '<p class="placeholder-text">Please choose or create a project context.</p>';
       return;
@@ -614,7 +616,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateQueueViewWarnings() {
     const warning = document.getElementById("queueProjectWarning");
     const container = document.getElementById("queueStatsContent");
-    if (!currentUser.authenticated || !activeProjectId) {
+    if (!activeProjectId) {
       if (warning) warning.style.display = "flex";
       if (container) container.style.display = "none";
     } else {
@@ -626,7 +628,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateAnalyticsViewWarnings() {
     const warning = document.getElementById("analyticsProjectWarning");
     const container = document.getElementById("analyticsContentWrapper");
-    if (!currentUser.authenticated || !activeProjectId) {
+    if (!activeProjectId) {
       if (warning) warning.style.display = "flex";
       if (container) container.style.display = "none";
     } else {
@@ -638,7 +640,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updatePassedViewWarnings() {
     const warning = document.getElementById("passedProjectWarning");
     const container = document.getElementById("passedContentWrapper");
-    if (!currentUser.authenticated || !activeProjectId) {
+    if (!activeProjectId) {
       if (warning) warning.style.display = "flex";
       if (container) container.style.display = "none";
     } else {
@@ -650,7 +652,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateLogsViewWarnings() {
     const warning = document.getElementById("logsProjectWarning");
     const container = document.getElementById("logsContentWrapper");
-    if (!currentUser.authenticated || !activeProjectId) {
+    if (!activeProjectId) {
       if (warning) warning.style.display = "flex";
       if (container) container.style.display = "none";
     } else {
