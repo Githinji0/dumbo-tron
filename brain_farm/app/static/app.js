@@ -64,18 +64,26 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (viewId === "farming-run") {
       updateFarmingViewWarnings();
     } else if (viewId === "live-queue") {
+      updateQueueViewWarnings();
       startQueuePolling();
       stopAnalyticsPolling();
       stopLogsTabPolling();
     } else if (viewId === "analytics") {
+      updateAnalyticsViewWarnings();
       stopQueuePolling();
       startAnalyticsPolling();
       stopLogsTabPolling();
     } else if (viewId === "project-logs-tab") {
+      updateLogsViewWarnings();
       stopQueuePolling();
       stopAnalyticsPolling();
-      updateLogsViewWarnings();
       startLogsTabPolling();
+    } else if (viewId === "passed-results") {
+      updatePassedViewWarnings();
+      stopQueuePolling();
+      stopAnalyticsPolling();
+      stopLogsTabPolling();
+      loadPassedResults();
     } else if (viewId === "ai-lab") {
       stopQueuePolling();
       stopAnalyticsPolling();
@@ -95,10 +103,6 @@ document.addEventListener("DOMContentLoaded", () => {
       stopQueuePolling();
       stopAnalyticsPolling();
       stopLogsTabPolling();
-    }
-
-    if (viewId === "passed-results") {
-      loadPassedResults();
     }
   }
 
@@ -225,6 +229,12 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("activeProjectSelect").addEventListener("change", (e) => {
       activeProjectId = e.target.value ? parseInt(e.target.value) : null;
       updateProjectSummaries();
+      if (activeProjectId) {
+        loadDiagnosticsLogs();
+        loadAnalyticsData();
+        loadPassedResults();
+        loadQueueData();
+      }
     });
 
     // Fields Catalog filtering
@@ -544,6 +554,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       window.cachedProjects = projects;
       updateProjectSummaries();
+      if (activeProjectId) {
+        loadDiagnosticsLogs();
+        loadAnalyticsData();
+        loadPassedResults();
+        loadQueueData();
+      }
     } catch (err) {
       console.error("List load failed:", err);
     }
