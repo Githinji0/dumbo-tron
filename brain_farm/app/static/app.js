@@ -997,100 +997,59 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- Virtual scroll state ---
-  let _vsLogs = [];        // full data array
-  const ROW_HEIGHT = 72;   // estimated px per log row
-  const VS_BUFFER = 5;    // extra rows to render above/below viewport
-  let _vsRafPending = false;
-
-  function vsSetup() {
-    const viewport = document.getElementById("logsFeedViewport");
-    if (!viewport) return;
-
-    // Max height: fill remaining page up to 80vh
-    viewport.style.maxHeight = "80vh";
-    viewport.style.minHeight = "120px";
-
-    viewport.addEventListener("scroll", vsOnScroll, { passive: true });
-
-    // Keep layout correct when window resizes
-    if (window._vsResizeObs) window._vsResizeObs.disconnect();
-    window._vsResizeObs = new ResizeObserver(() => vsRender());
-    window._vsResizeObs.observe(viewport);
-  }
-
-  function vsOnScroll() {
-    if (_vsRafPending) return;
-    _vsRafPending = true;
-    requestAnimationFrame(() => {
-      _vsRafPending = false;
-      vsRender();
-    });
-  }
-
-  function vsRender() {
-    const viewport = document.getElementById("logsFeedViewport");
-    const list = document.getElementById("logsFeedList");
-    const spacer = document.getElementById("logsFeedSpacer");
-    if (!viewport || !list || !spacer) return;
-
-    const totalRows = _vsLogs.length;
-    const totalHeight = totalRows * ROW_HEIGHT;
-
-    // Spacer controls scrollbar range
-    spacer.style.height = totalHeight + "px";
-
-    const scrollTop = viewport.scrollTop;
-    const vpHeight = viewport.clientHeight;
-    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - VS_BUFFER);
-    const endIdx = Math.min(totalRows, Math.ceil((scrollTop + vpHeight) / ROW_HEIGHT) + VS_BUFFER);
-
-    list.innerHTML = "";
-    list.style.transform = `translateY(${startIdx * ROW_HEIGHT}px)`;
-
-    for (let i = startIdx; i < endIdx; i++) {
-      const log = _vsLogs[i];
-      const div = document.createElement("div");
-      div.className = `log-line ${log.level}`;
-      div.style.height = ROW_HEIGHT + "px";
-      const formattedMsg = log.message.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
-      div.innerHTML = `<span>[${log.timestamp}]</span> ${formattedMsg}`;
-      div.addEventListener("click", () => showLogDetail(log));
-      list.appendChild(div);
-    }
-  }
+  // --- Log Feed Renderer ---
+  let _lastLogsHash = "";
 
   async function loadDiagnosticsLogs() {
     if (!activeProjectId) return;
     try {
-      const level = document.getElementById("filterLogLevelSelect").value;
-      const search = document.getElementById("inputLogSearch").value;
-      const limit = document.getElementById("selectLogLimit").value;
+      const levelSelect = document.getElementById("filterLogLevelSelect");
+      const searchInput = document.getElementById("inputLogSearch");
+      const limitSelect = document.getElementById("selectLogLimit");
+
+      const level = levelSelect ? levelSelect.value : "ALL";
+      const search = searchInput ? searchInput.value : "";
+      const limit = limitSelect ? limitSelect.value : 100;
 
       let url = `/api/logs?project_id=${activeProjectId}&limit=${limit}`;
       if (level && level !== "ALL") url += `&level=${encodeURIComponent(level)}`;
       if (search && search.trim() !== "") url += `&search=${encodeURIComponent(search.trim())}`;
 
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: getHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch logs");
       const logs = await res.json();
 
-      const viewport = document.getElementById("logsFeedViewport");
       const list = document.getElementById("logsFeedList");
-      if (!viewport || !list) return;
+      if (!list) return;
 
-      if (logs.length === 0) {
-        _vsLogs = [];
-        list.innerHTML = '<p class="placeholder-text">No message logs captured matching criteria...</p>';
-        document.getElementById("logsFeedSpacer").style.height = "0px";
+      if (!logs || logs.length === 0) {
+        _lastLogsHash = "";
+        list.innerHTML = '<p class="placeholder-text" style="padding: 20px; text-align: center; color: var(--text-secondary);">No message logs captured matching criteria...</p>';
         return;
       }
 
-      _vsLogs = logs;
-      vsSetup();
-      viewport.scrollTop = 0;
-      vsRender();
+      // Checksum to avoid re-rendering DOM if logs haven't changed
+      const newHash = `${activeProjectId}:${level}:${search}:${limit}:${logs.length}:${logs[0].timestamp}:${logs[0].message.slice(0, 30)}`;
+      if (newHash === _lastLogsHash) {
+        return;
+      }
+      _lastLogsHash = newHash;
+
+      const fragment = document.createDocumentFragment();
+      logs.forEach(log => {
+        const div = document.createElement("div");
+        const levelUpper = (log.level || "INFO").toUpperCase();
+        div.className = `log-line ${levelUpper}`;
+        
+        const formattedMsg = log.message.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
+        div.innerHTML = `<span style="color:var(--text-secondary); font-weight:600; margin-right:8px;">[${log.timestamp}]</span> ${formattedMsg}`;
+        div.addEventListener("click", () => showLogDetail(log));
+        fragment.appendChild(div);
+      });
+
+      list.replaceChildren(fragment);
     } catch (err) {
-      console.error(err);
+      console.error("Failed loading diagnostics logs:", err);
     }
   }
 

@@ -895,13 +895,10 @@
               </div>
             </div>
 
-            <!-- Virtual-scroll Log Feed (no card wrapper) -->
+            <!-- Diagnostic Log Feed -->
             <div id="logsFeedViewport"
-              style="position: relative; overflow-y: auto; font-family: monospace; background: var(--bg-primary); border-radius: 6px; margin-top: 4px;">
-              <!-- Spacer that gives the scrollbar its full height -->
-              <div id="logsFeedSpacer" style="position: absolute; top: 0; left: 0; width: 1px;"></div>
-              <!-- Rendered rows anchored by translateY inside JS -->
-              <div id="logsFeedList" style="position: relative; width: 100%;"></div>
+              style="position: relative; overflow-y: auto; max-height: 72vh; min-height: 250px; font-family: monospace; background: var(--bg-primary); border-radius: 6px; margin-top: 10px; padding: 8px; border: 1px solid var(--border-color);">
+              <div id="logsFeedList" style="width: 100%;"></div>
             </div>
           </div>
         </section>
