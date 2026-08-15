@@ -481,7 +481,17 @@ class BrainClient:
         try:
             res = await self._send_request("GET", f"{self.base_url}/simulations/{sim_id}")
             if res.status_code == 200:
-                return res.json(), None
+                sim_data = res.json()
+                # If BRAIN completed simulation and returned an alpha ID, fetch alpha metrics
+                if isinstance(sim_data, dict) and sim_data.get("status") == "COMPLETE" and sim_data.get("alpha") and not sim_data.get("is"):
+                    alpha_id = sim_data["alpha"]
+                    alpha_res = await self._send_request("GET", f"{self.base_url}/alphas/{alpha_id}")
+                    if alpha_res.status_code == 200:
+                        alpha_data = alpha_res.json()
+                        if isinstance(alpha_data, dict):
+                            alpha_data.setdefault("status", "COMPLETE")
+                            return alpha_data, None
+                return sim_data, None
             if res.status_code == 424:
                 return None, "Dependency failed."
             if res.status_code in (401, 403):

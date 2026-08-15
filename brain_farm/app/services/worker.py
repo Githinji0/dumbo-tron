@@ -270,14 +270,20 @@ class SimulationWorker:
             )
             await db.commit()
 
-            result = await db.execute(
+            active_user_ids = [uid for uid, c in self._active_clients.items() if c and c.is_authenticated]
+            query = (
                 select(Simulation)
                 .join(Expression)
                 .join(Project)
                 .options(selectinload(Simulation.expression).selectinload(Expression.project))
                 .where(Simulation.status == "QUEUED")
-                .limit(10)
             )
+            if active_user_ids:
+                query = query.order_by(Project.user_id.in_(active_user_ids).desc(), Simulation.id.asc())
+            else:
+                query = query.order_by(Simulation.id.asc())
+
+            result = await db.execute(query.limit(10))
             sims = result.scalars().all()
 
             for sim in sims:
@@ -364,27 +370,36 @@ class SimulationWorker:
         Also re-queues NEEDS_AUTH sims if a fresh session has been injected.
         """
         async with AsyncSessionLocal() as db:
+            # 1. Re-queue NEEDS_AUTH sims if a fresh session has been injected for their user
+            active_user_ids = [uid for uid, c in self._active_clients.items() if c and c.is_authenticated]
+            if active_user_ids:
+                requeue_res = await db.execute(
+                    select(Simulation)
+                    .join(Expression)
+                    .join(Project)
+                    .where(Simulation.status == "NEEDS_AUTH")
+                    .where(Project.user_id.in_(active_user_ids))
+                    .limit(50)
+                )
+                for sim in requeue_res.scalars().all():
+                    sim.status = "QUEUED"
+                    sim.error_message = None
+                    logger.info(f"NEEDS_AUTH sim {sim.id} re-queued after session restored.")
+                await db.commit()
+
+            # 2. Query POLLING simulations specifically (so NEEDS_AUTH can never starve POLLING)
             result = await db.execute(
                 select(Simulation)
                 .join(Expression)
                 .join(Project)
                 .options(selectinload(Simulation.expression).selectinload(Expression.project))
-                .where(Simulation.status.in_(["POLLING", "NEEDS_AUTH"]))
+                .where(Simulation.status == "POLLING")
                 .order_by(Simulation.updated_at.asc())
                 .limit(50)
             )
             sims = result.scalars().all()
 
             for sim in sims:
-                if sim.status == "NEEDS_AUTH":
-                    # Only retry if a fresh session has been injected since the failure
-                    proj = sim.expression.project
-                    if proj.user_id in self._active_clients and self._active_clients[proj.user_id].is_authenticated:
-                        sim.status = "QUEUED"
-                        sim.error_message = None
-                        logger.info(f"NEEDS_AUTH sim {sim.id} re-queued after session restored.")
-                    continue  # Don't poll a sim with no brain_simulation_id
-
                 # Launch async status checker for POLLING sims
                 asyncio.create_task(self._poll_simulation_task(sim.id))
 
