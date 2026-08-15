@@ -600,65 +600,33 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
-  // Warnings update
+  // Warnings update — only show/hide the banner, never hide the content
   function updateFarmingViewWarnings() {
     const warning = document.getElementById("farmingProjectWarning");
     const container = document.getElementById("farmingRunFormWrapper");
-    if (!currentUser.authenticated || !activeProjectId) {
-      if (warning) warning.style.display = "flex";
-      if (container) container.style.display = "none";
-    } else {
-      if (warning) warning.style.display = "none";
-      if (container) container.style.display = "grid";
-    }
+    const needsAuth = !currentUser.authenticated || !activeProjectId;
+    if (warning) warning.style.display = needsAuth ? "flex" : "none";
+    if (container) container.style.display = needsAuth ? "none" : "grid";
   }
 
   function updateQueueViewWarnings() {
     const warning = document.getElementById("queueProjectWarning");
-    const container = document.getElementById("queueStatsContent");
-    if (!activeProjectId) {
-      if (warning) warning.style.display = "flex";
-      if (container) container.style.display = "none";
-    } else {
-      if (warning) warning.style.display = "none";
-      if (container) container.style.display = "block";
-    }
+    if (warning) warning.style.display = activeProjectId ? "none" : "flex";
   }
 
   function updateAnalyticsViewWarnings() {
     const warning = document.getElementById("analyticsProjectWarning");
-    const container = document.getElementById("analyticsContentWrapper");
-    if (!activeProjectId) {
-      if (warning) warning.style.display = "flex";
-      if (container) container.style.display = "none";
-    } else {
-      if (warning) warning.style.display = "none";
-      if (container) container.style.display = "block";
-    }
+    if (warning) warning.style.display = activeProjectId ? "none" : "flex";
   }
 
   function updatePassedViewWarnings() {
     const warning = document.getElementById("passedProjectWarning");
-    const container = document.getElementById("passedContentWrapper");
-    if (!activeProjectId) {
-      if (warning) warning.style.display = "flex";
-      if (container) container.style.display = "none";
-    } else {
-      if (warning) warning.style.display = "none";
-      if (container) container.style.display = "block";
-    }
+    if (warning) warning.style.display = activeProjectId ? "none" : "flex";
   }
 
   function updateLogsViewWarnings() {
     const warning = document.getElementById("logsProjectWarning");
-    const container = document.getElementById("logsContentWrapper");
-    if (!activeProjectId) {
-      if (warning) warning.style.display = "flex";
-      if (container) container.style.display = "none";
-    } else {
-      if (warning) warning.style.display = "none";
-      if (container) container.style.display = "block";
-    }
+    if (warning) warning.style.display = activeProjectId ? "none" : "flex";
   }
 
   // Fields Catalog implementation
