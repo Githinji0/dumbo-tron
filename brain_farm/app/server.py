@@ -1106,15 +1106,15 @@ async def get_operator_research_stats(project_id: Optional[int] = None):
 
 @app.get("/api/logs")
 async def get_logs(
-    project_id: int,
+    project_id: Optional[int] = None,
     limit: int = 100,
     level: Optional[str] = None,
     search: Optional[str] = None
 ):
     async with AsyncSessionLocal() as db:
-        query = select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message).where(
-            ProjectLog.project_id == project_id
-        )
+        query = select(ProjectLog.created_at, ProjectLog.level, ProjectLog.message)
+        if project_id is not None and project_id > 0:
+            query = query.where(ProjectLog.project_id == project_id)
         if level and level.strip() and level.upper() != "ALL":
             query = query.where(ProjectLog.level == level.strip().upper())
         if search and search.strip():

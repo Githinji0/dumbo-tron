@@ -1003,7 +1003,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let _lastLogsHash = "";
 
   async function loadDiagnosticsLogs() {
-    if (!activeProjectId) return;
     try {
       const levelSelect = document.getElementById("filterLogLevelSelect");
       const searchInput = document.getElementById("inputLogSearch");
@@ -1013,7 +1012,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const search = searchInput ? searchInput.value : "";
       const limit = limitSelect ? limitSelect.value : 100;
 
-      let url = `/api/logs?project_id=${activeProjectId}&limit=${limit}`;
+      let url = activeProjectId ? `/api/logs?project_id=${activeProjectId}&limit=${limit}` : `/api/logs?limit=${limit}`;
       if (level && level !== "ALL") url += `&level=${encodeURIComponent(level)}`;
       if (search && search.trim() !== "") url += `&search=${encodeURIComponent(search.trim())}`;
 
@@ -1031,8 +1030,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // Checksum to avoid re-rendering DOM if logs haven't changed
-      const newHash = `${activeProjectId}:${level}:${search}:${limit}:${logs.length}:${logs[0].timestamp}:${logs[0].message.slice(0, 30)}`;
-      if (newHash === _lastLogsHash) {
+      const firstMsg = logs[0] && logs[0].message ? String(logs[0].message).slice(0, 30) : "";
+      const firstTime = logs[0] && logs[0].timestamp ? logs[0].timestamp : "";
+      const newHash = `${activeProjectId}:${level}:${search}:${limit}:${logs.length}:${firstTime}:${firstMsg}`;
+      if (newHash === _lastLogsHash && list.children.length > 0 && !list.querySelector('.placeholder-text')) {
         return;
       }
       _lastLogsHash = newHash;
@@ -1043,8 +1044,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const levelUpper = (log.level || "INFO").toUpperCase();
         div.className = `log-line ${levelUpper}`;
         
-        const formattedMsg = log.message.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
-        div.innerHTML = `<span style="color:var(--text-secondary); font-weight:600; margin-right:8px;">[${log.timestamp}]</span> ${formattedMsg}`;
+        const timestampSpan = document.createElement("span");
+        timestampSpan.className = "log-timestamp";
+        timestampSpan.textContent = `[${log.timestamp}]`;
+
+        const messageSpan = document.createElement("span");
+        messageSpan.className = "log-message";
+        messageSpan.textContent = log.message;
+
+        div.appendChild(timestampSpan);
+        div.appendChild(messageSpan);
         div.addEventListener("click", () => showLogDetail(log));
         fragment.appendChild(div);
       });
